@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>حاسبة ميزانية الرحلات الجماعية</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #f4f6f8;
+    --surface: #ffffff;
+    --primary: #0e7c66;
+    --primary-dark: #095f4f;
+    --accent: #c99a3c;
+    --text: #1e2a2f;
+    --text-muted: #6b7780;
+    --border: #e1e6e9;
+    --danger: #c0392b;
+    --success: #1e8e3e;
+    --radius: 12px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+  }
+
+  body {
+    font-family: 'Cairo', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    direction: rtl;
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+  }
+
+  header.app-header {
+    background: linear-gradient(90deg, var(--primary), var(--primary-dark));
+    color: #fff;
+    padding: 16px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+  }
+
+  header.app-header .title {
+    font-size: 20px;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  #conn-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.15);
+  }
+
+  #conn-status .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ffd166;
+  }
+
+  #conn-status.connected .dot { background: #4ade80; }
+  #conn-status.error .dot { background: #f87171; }
+
+  nav.app-nav {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    overflow-x: auto;
+    padding: 0 12px;
+  }
+
+  nav.app-nav button {
+    font-family: inherit;
+    background: none;
+    border: none;
+    padding: 14px 16px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    white-space: nowrap;
+    border-bottom: 3px solid transparent;
+    transition: color .15s, border-color .15s;
+  }
+
+  nav.app-nav button:hover {
+    color: var(--primary);
+  }
+
+  nav.app-nav button.active {
+    color: var(--primary);
+    border-bottom-color: var(--primary);
+  }
+
+  main {
+    flex: 1;
+    padding: 24px;
+    max-width: 1100px;
+    width: 100%;
+    margin: 0 auto;
+  }
+
+  .screen {
+    display: none;
+    animation: fadeIn .2s ease-in;
+  }
+
+  .screen.active {
+    display: block;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 24px;
+    margin-bottom: 16px;
+  }
+
+  .card h2 {
+    margin-top: 0;
+    font-size: 18px;
+    color: var(--primary-dark);
+  }
+
+  .placeholder {
+    color: var(--text-muted);
+    font-size: 14px;
+    line-height: 1.9;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 32px;
+    text-align: center;
+  }
+
+  .badge {
+    display: inline-block;
+    font-size: 12px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: #fdf3d9;
+    color: var(--accent);
+    margin-inline-start: 8px;
+  }
+
+  footer.app-footer {
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-muted);
+    padding: 16px;
+  }
+</style>
+</head>
+<body>
+
+<header class="app-header">
+  <div class="title">🧳 حاسبة ميزانية الرحلات الجماعية</div>
+  <div id="conn-status"><span class="dot"></span><span id="conn-status-text">جارٍ الاتصال بقاعدة البيانات…</span></div>
+</header>
+
+<nav class="app-nav" id="app-nav">
+  <button data-screen="trips-list" class="active">قائمة الرحلات</button>
+  <button data-screen="trip-create">إنشاء رحلة</button>
+  <button data-screen="participants">إدارة المشاركين</button>
+  <button data-screen="expense-add">إضافة مصروف</button>
+  <button data-screen="expenses-list">قائمة المصاريف</button>
+  <button data-screen="closure">إقفال الميزانية</button>
+  <button data-screen="dashboard">الداش بورد</button>
+  <button data-screen="reports">التقارير</button>
+  <button data-screen="settings-rates">أسعار الصرف</button>
+</nav>
+
+<main>
+  <section id="trips-list" class="screen active">
+    <div class="card">
+      <h2>قائمة الرحلات</h2>
+      <div class="placeholder">لا توجد رحلات بعد.<br>سيتم عرض بطاقات الرحلات هنا في المرحلة القادمة.</div>
+    </div>
+  </section>
+
+  <section id="trip-create" class="screen">
+    <div class="card">
+      <h2>إنشاء رحلة <span class="badge">قريبًا</span></h2>
+      <div class="placeholder">نموذج إنشاء الرحلة (الاسم، السنة، مصدر المشاركين، المحصّل، أسعار الصرف) سيُبنى في مرحلة لاحقة.</div>
+    </div>
+  </section>
+
+  <section id="participants" class="screen">
+    <div class="card">
+      <h2>إدارة المشاركين <span class="badge">قريبًا</span></h2>
+      <div class="placeholder">إضافة/حذف المشاركين، حالة نشط/مقفل، وحفظ كمجموعة جديدة.</div>
+    </div>
+  </section>
+
+  <section id="expense-add" class="screen">
+    <div class="card">
+      <h2>إضافة مصروف <span class="badge">قريبًا</span></h2>
+      <div class="placeholder">نموذج تسجيل المصاريف (الوصف، التصنيف، المبلغ، العملة، الدافع، المشاركون).</div>
+    </div>
+  </section>
+
+  <section id="expenses-list" class="screen">
+    <div class="card">
+      <h2>قائمة المصاريف <span class="badge">قريبًا</span></h2>
+      <div class="placeholder">جدول المصاريف القابل للفرز والفلترة.</div>
+    </div>
+  </section>
+
+  <section id="closure" class="screen">
+    <div class="card">
+      <h2>إقفال الميزانية <span class="badge">قريبًا</span></h2>
+      <div class="placeholder">اختيار مجموعة فرعية، معاينة الحساب النهائي، تجميد الرصيد وإعادة الفتح.</div>
+    </div>
+  </section>
+
+  <section id="dashboard" class="screen">
+    <div class="card">
+      <h2>الداش بورد <span class="badge">قريبًا</span></h2>
+      <div class="placeholder">بطاقات ورسوم Chart.js لملخص الصرف والتسوية وحالة الإقفال.</div>
+    </div>
+  </section>
+
+  <section id="reports" class="screen">
+    <div class="card">
+      <h2>التقارير <span class="badge">قريبًا</span></h2>
+      <div class="placeholder">تقرير كل شخص وتقرير التسوية بصيغتَي Word وPDF.</div>
+    </div>
+  </section>
+
+  <section id="settings-rates" class="screen">
+    <div class="card">
+      <h2>أسعار الصرف <span class="badge">قريبًا</span></h2>
+      <div class="placeholder">إدخال يدوي لأسعار USD وIQD مقابل الريال، مع خيار الجلب اللحظي.</div>
+    </div>
+  </section>
+</main>
+
+<footer class="app-footer">حاسبة ميزانية الرحلات الجماعية — نسخة أولية</footer>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+  import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyC4YdEYLI1JOsN6k-WycVonUH7UkxsVPmo",
+    authDomain: "travel-karbla.firebaseapp.com",
+    projectId: "travel-karbla",
+    storageBucket: "travel-karbla.firebasestorage.app",
+    messagingSenderId: "917036993858",
+    appId: "1:917036993858:web:3d040ffe62ba90eb70ccdb"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+  window.__db = db;
+
+  const statusEl = document.getElementById('conn-status');
+  const statusText = document.getElementById('conn-status-text');
+
+  getDocs(collection(db, "trips"))
+    .then((snapshot) => {
+      statusEl.classList.add('connected');
+      statusText.textContent = `متصل بقاعدة البيانات (${snapshot.size} رحلة)`;
+    })
+    .catch((err) => {
+      statusEl.classList.add('error');
+      statusText.textContent = 'تعذّر الاتصال بقاعدة البيانات';
+      console.error('Firestore connection error:', err);
+    });
+
+  const navButtons = document.querySelectorAll('#app-nav button');
+  const screens = document.querySelectorAll('.screen');
+
+  navButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      navButtons.forEach((b) => b.classList.remove('active'));
+      screens.forEach((s) => s.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(btn.dataset.screen).classList.add('active');
+    });
+  });
+</script>
+
+</body>
+</html>
