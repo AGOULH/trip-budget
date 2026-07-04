@@ -169,6 +169,171 @@
     margin-inline-start: 8px;
   }
 
+  .toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+
+  .btn {
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    border: none;
+    border-radius: 8px;
+    padding: 10px 20px;
+    cursor: pointer;
+    background: var(--primary);
+    color: #fff;
+    transition: background .15s;
+  }
+
+  .btn:hover { background: var(--primary-dark); }
+
+  .btn.secondary {
+    background: none;
+    color: var(--primary);
+    border: 1px solid var(--primary);
+  }
+
+  .btn.secondary:hover { background: #eafaf5; }
+
+  .trips-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 16px;
+  }
+
+  .trip-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px;
+  }
+
+  .trip-card h3 {
+    margin: 0 0 4px;
+    font-size: 16px;
+    color: var(--text);
+  }
+
+  .trip-card .year {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+  }
+
+  .trip-card .stat-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    color: var(--text-muted);
+    padding: 4px 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .trip-card .stat-row span:last-child {
+    font-weight: 700;
+    color: var(--text);
+  }
+
+  .trip-card .currencies {
+    margin-top: 10px;
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+
+  .chip {
+    font-size: 11px;
+    font-weight: 700;
+    background: #eef3f2;
+    color: var(--primary-dark);
+    border-radius: 6px;
+    padding: 2px 8px;
+  }
+
+  form.form-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  form.form-grid .full { grid-column: 1 / -1; }
+
+  .field label {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--text-muted);
+  }
+
+  .field input[type="text"],
+  .field input[type="number"] {
+    width: 100%;
+    font-family: inherit;
+    font-size: 14px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: #fff;
+    color: var(--text);
+  }
+
+  .field input:focus {
+    outline: none;
+    border-color: var(--primary);
+  }
+
+  .checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+
+  .checkbox-row input { width: 16px; height: 16px; }
+
+  .form-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 8px;
+  }
+
+  .form-note {
+    font-size: 12px;
+    color: var(--text-muted);
+    background: #f7f9fa;
+    border-radius: 8px;
+    padding: 10px 12px;
+  }
+
+  .toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--text);
+    color: #fff;
+    padding: 10px 20px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s;
+    z-index: 50;
+  }
+
+  .toast.show { opacity: 1; }
+  .toast.error { background: var(--danger); }
+
   footer.app-footer {
     text-align: center;
     font-size: 12px;
@@ -199,15 +364,49 @@
 <main>
   <section id="trips-list" class="screen active">
     <div class="card">
-      <h2>قائمة الرحلات</h2>
-      <div class="placeholder">لا توجد رحلات بعد.<br>سيتم عرض بطاقات الرحلات هنا في المرحلة القادمة.</div>
+      <div class="toolbar">
+        <h2 style="margin:0">قائمة الرحلات</h2>
+        <button class="btn" id="btn-new-trip">+ رحلة جديدة</button>
+      </div>
+      <div id="trips-empty" class="placeholder">لا توجد رحلات بعد.<br>اضغط "رحلة جديدة" لإنشاء أول رحلة.</div>
+      <div id="trips-grid" class="trips-grid"></div>
     </div>
   </section>
 
   <section id="trip-create" class="screen">
     <div class="card">
-      <h2>إنشاء رحلة <span class="badge">قريبًا</span></h2>
-      <div class="placeholder">نموذج إنشاء الرحلة (الاسم، السنة، مصدر المشاركين، المحصّل، أسعار الصرف) سيُبنى في مرحلة لاحقة.</div>
+      <h2>إنشاء رحلة</h2>
+      <form class="form-grid" id="trip-create-form">
+        <div class="field full">
+          <label for="trip-name">اسم الرحلة</label>
+          <input type="text" id="trip-name" placeholder="مثال: زيارة كربلاء 2027" required>
+        </div>
+        <div class="field">
+          <label for="trip-year">السنة</label>
+          <input type="number" id="trip-year" required>
+        </div>
+        <div class="field">
+          <label>العملات المستخدمة</label>
+          <div class="checkbox-row"><input type="checkbox" checked disabled> ريال سعودي (SAR) — العملة المرجعية</div>
+          <div class="checkbox-row"><label style="margin:0;font-weight:600;display:flex;align-items:center;gap:8px"><input type="checkbox" id="cur-usd"> دولار أمريكي (USD)</label></div>
+          <div class="checkbox-row"><label style="margin:0;font-weight:600;display:flex;align-items:center;gap:8px"><input type="checkbox" id="cur-iqd"> دينار عراقي (IQD)</label></div>
+        </div>
+        <div class="field" id="rate-usd-field" style="display:none">
+          <label for="rate-usd">سعر الدولار مقابل الريال (كم ريال = 1 دولار)</label>
+          <input type="number" id="rate-usd" step="0.0001" min="0">
+        </div>
+        <div class="field" id="rate-iqd-field" style="display:none">
+          <label for="rate-iqd">سعر الدينار العراقي مقابل الريال (كم ريال = 1 دينار)</label>
+          <input type="number" id="rate-iqd" step="0.000001" min="0">
+        </div>
+        <div class="full form-note">
+          سيتم تحديد <b>المحصّل</b> لاحقًا من قائمة مشاركي الرحلة بعد إضافتهم (مرحلة إدارة المشاركين).
+        </div>
+        <div class="full form-actions">
+          <button type="submit" class="btn">حفظ الرحلة</button>
+          <button type="button" class="btn secondary" id="btn-cancel-create">إلغاء</button>
+        </div>
+      </form>
     </div>
   </section>
 
@@ -263,9 +462,14 @@
 
 <footer class="app-footer">حاسبة ميزانية الرحلات الجماعية — نسخة أولية</footer>
 
+<div class="toast" id="toast"></div>
+
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
-  import { getFirestore, collection, getDocs } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+  import {
+    getFirestore, collection, addDoc, onSnapshot,
+    query, orderBy, serverTimestamp
+  } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
   const firebaseConfig = {
     apiKey: "AIzaSyC4YdEYLI1JOsN6k-WycVonUH7UkxsVPmo",
@@ -278,33 +482,159 @@
 
   const app = initializeApp(firebaseConfig);
   const db = getFirestore(app);
-  window.__db = db;
 
   const statusEl = document.getElementById('conn-status');
   const statusText = document.getElementById('conn-status-text');
 
-  getDocs(collection(db, "trips"))
-    .then((snapshot) => {
-      statusEl.classList.add('connected');
-      statusText.textContent = `متصل بقاعدة البيانات (${snapshot.size} رحلة)`;
-    })
-    .catch((err) => {
-      statusEl.classList.add('error');
-      statusText.textContent = 'تعذّر الاتصال بقاعدة البيانات';
-      console.error('Firestore connection error:', err);
-    });
-
+  // ---------- التنقّل بين الشاشات ----------
   const navButtons = document.querySelectorAll('#app-nav button');
   const screens = document.querySelectorAll('.screen');
 
+  function showScreen(screenId) {
+    navButtons.forEach((b) => b.classList.toggle('active', b.dataset.screen === screenId));
+    screens.forEach((s) => s.classList.toggle('active', s.id === screenId));
+  }
+
   navButtons.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      navButtons.forEach((b) => b.classList.remove('active'));
-      screens.forEach((s) => s.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById(btn.dataset.screen).classList.add('active');
-    });
+    btn.addEventListener('click', () => showScreen(btn.dataset.screen));
   });
+
+  document.getElementById('btn-new-trip').addEventListener('click', () => showScreen('trip-create'));
+  document.getElementById('btn-cancel-create').addEventListener('click', () => showScreen('trips-list'));
+
+  // ---------- تنبيه سريع ----------
+  const toastEl = document.getElementById('toast');
+  let toastTimer = null;
+  function showToast(message, isError) {
+    toastEl.textContent = message;
+    toastEl.classList.toggle('error', !!isError);
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2800);
+  }
+
+  // ---------- نموذج إنشاء رحلة ----------
+  const yearInput = document.getElementById('trip-year');
+  yearInput.value = new Date().getFullYear();
+
+  const curUsd = document.getElementById('cur-usd');
+  const curIqd = document.getElementById('cur-iqd');
+  const rateUsdField = document.getElementById('rate-usd-field');
+  const rateIqdField = document.getElementById('rate-iqd-field');
+
+  curUsd.addEventListener('change', () => {
+    rateUsdField.style.display = curUsd.checked ? 'block' : 'none';
+  });
+  curIqd.addEventListener('change', () => {
+    rateIqdField.style.display = curIqd.checked ? 'block' : 'none';
+  });
+
+  const tripForm = document.getElementById('trip-create-form');
+  tripForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const name = document.getElementById('trip-name').value.trim();
+    const year = parseInt(yearInput.value, 10);
+    if (!name || !year) {
+      showToast('الرجاء إدخال اسم الرحلة والسنة', true);
+      return;
+    }
+
+    const currencies = ['SAR'];
+    const rates = {};
+    if (curUsd.checked) {
+      currencies.push('USD');
+      rates.USD = parseFloat(document.getElementById('rate-usd').value) || 0;
+    }
+    if (curIqd.checked) {
+      currencies.push('IQD');
+      rates.IQD = parseFloat(document.getElementById('rate-iqd').value) || 0;
+    }
+
+    const submitBtn = tripForm.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+
+    try {
+      await addDoc(collection(db, 'trips'), {
+        name,
+        year,
+        baseCurrency: 'SAR',
+        currencies,
+        rates,
+        ratesSource: 'manual',
+        ratesUpdatedAt: serverTimestamp(),
+        treasurerId: null,
+        participants: [],
+        sourceGroupId: null,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+
+      showToast('تم إنشاء الرحلة بنجاح');
+      tripForm.reset();
+      yearInput.value = new Date().getFullYear();
+      rateUsdField.style.display = 'none';
+      rateIqdField.style.display = 'none';
+      showScreen('trips-list');
+    } catch (err) {
+      console.error('Trip creation error:', err);
+      showToast('تعذّر إنشاء الرحلة', true);
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+
+  // ---------- قائمة الرحلات (استماع حي) ----------
+  const tripsGrid = document.getElementById('trips-grid');
+  const tripsEmpty = document.getElementById('trips-empty');
+  const currencyLabels = { SAR: 'ريال', USD: 'دولار', IQD: 'دينار عراقي' };
+
+  function tripCardHTML(trip) {
+    const participants = trip.participants || [];
+    const activeCount = participants.filter((p) => p.status === 'active').length;
+    const currencyChips = (trip.currencies || ['SAR'])
+      .map((c) => `<span class="chip">${currencyLabels[c] || c}</span>`)
+      .join('');
+
+    return `
+      <div class="trip-card">
+        <h3>${escapeHTML(trip.name || 'بدون اسم')}</h3>
+        <div class="year">${trip.year || ''}</div>
+        <div class="stat-row"><span>المشاركون (نشط/الكل)</span><span>${activeCount}/${participants.length}</span></div>
+        <div class="stat-row"><span>إجمالي الصرف (ريال)</span><span>0.00</span></div>
+        <div class="currencies">${currencyChips}</div>
+      </div>
+    `;
+  }
+
+  function escapeHTML(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  onSnapshot(
+    query(collection(db, 'trips'), orderBy('createdAt', 'desc')),
+    (snapshot) => {
+      statusEl.classList.remove('error');
+      statusEl.classList.add('connected');
+      statusText.textContent = `متصل بقاعدة البيانات (${snapshot.size} رحلة)`;
+
+      if (snapshot.empty) {
+        tripsEmpty.style.display = 'block';
+        tripsGrid.innerHTML = '';
+        return;
+      }
+
+      tripsEmpty.style.display = 'none';
+      tripsGrid.innerHTML = snapshot.docs.map((d) => tripCardHTML(d.data())).join('');
+    },
+    (err) => {
+      statusEl.classList.add('error');
+      statusText.textContent = 'تعذّر الاتصال بقاعدة البيانات';
+      console.error('Firestore connection error:', err);
+    }
+  );
 </script>
 
 </body>
