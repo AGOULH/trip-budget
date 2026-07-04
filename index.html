@@ -549,15 +549,81 @@
 
   <section id="expense-add" class="screen">
     <div class="card">
-      <h2>إضافة مصروف <span class="badge">قريبًا</span></h2>
-      <div class="placeholder">نموذج تسجيل المصاريف (الوصف، التصنيف، المبلغ، العملة، الدافع، المشاركون).</div>
+      <h2 id="expense-form-title">إضافة مصروف</h2>
+      <form class="form-grid" id="expense-form">
+        <div class="field full">
+          <label for="exp-desc">الوصف</label>
+          <input type="text" id="exp-desc" required>
+        </div>
+        <div class="field">
+          <label for="exp-category">التصنيف</label>
+          <select id="exp-category">
+            <option>تذاكر</option>
+            <option>فيزا</option>
+            <option>سكن</option>
+            <option>مواصلات</option>
+            <option>أكل</option>
+            <option>زيارات</option>
+            <option>متفرقات</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="exp-date">التاريخ</label>
+          <input type="date" id="exp-date" required>
+        </div>
+        <div class="field">
+          <label for="exp-amount">المبلغ</label>
+          <input type="number" id="exp-amount" min="0" step="0.01" required>
+        </div>
+        <div class="field">
+          <label for="exp-currency">العملة</label>
+          <select id="exp-currency"></select>
+        </div>
+        <div class="field">
+          <label for="exp-payer">الدافع</label>
+          <select id="exp-payer" required></select>
+        </div>
+        <div class="field full">
+          <div class="toolbar" style="margin-bottom:8px">
+            <label style="margin:0;font-weight:600">المشاركون في هذا المصروف (النشطون)</label>
+            <button type="button" class="btn secondary" id="btn-select-all-participants">تحديد الكل</button>
+          </div>
+          <div id="expense-participants-picker"></div>
+        </div>
+        <div class="full form-actions">
+          <button type="submit" class="btn" id="btn-submit-expense">حفظ المصروف</button>
+          <button type="button" class="btn secondary" id="btn-cancel-expense">إلغاء</button>
+        </div>
+      </form>
     </div>
   </section>
 
   <section id="expenses-list" class="screen">
     <div class="card">
-      <h2>قائمة المصاريف <span class="badge">قريبًا</span></h2>
-      <div class="placeholder">جدول المصاريف القابل للفرز والفلترة.</div>
+      <div class="toolbar">
+        <h2 style="margin:0">قائمة المصاريف</h2>
+        <button class="btn" id="btn-goto-add-expense">+ إضافة مصروف</button>
+      </div>
+      <div class="form-grid" style="margin-bottom:16px">
+        <div class="field"><label>تصنيف</label><select id="filter-category"><option value="">الكل</option></select></div>
+        <div class="field"><label>عملة</label><select id="filter-currency"><option value="">الكل</option></select></div>
+        <div class="field"><label>شخص</label><select id="filter-person"><option value="">الكل</option></select></div>
+      </div>
+      <div id="expenses-empty" class="placeholder">لا توجد مصاريف بعد.</div>
+      <table class="data-table" id="expenses-table" style="display:none">
+        <thead>
+          <tr>
+            <th data-sort="date" style="cursor:pointer">التاريخ ⇅</th>
+            <th>الوصف</th>
+            <th>التصنيف</th>
+            <th data-sort="amountSAR" style="cursor:pointer">المبلغ ⇅</th>
+            <th>الدافع</th>
+            <th>المشاركون</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="expenses-tbody"></tbody>
+      </table>
     </div>
   </section>
 
@@ -615,7 +681,7 @@
   import {
     getFirestore, collection, addDoc, onSnapshot,
     query, orderBy, serverTimestamp,
-    doc, updateDoc, getDoc, getDocs
+    doc, updateDoc, getDoc, getDocs, deleteDoc
   } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -664,12 +730,15 @@
   let currentTripId = null;
   let currentTripData = null;
   let unsubTripDoc = null;
+  let unsubExpenses = null;
+  let currentExpenses = [];
 
   const tripContextEl = document.getElementById('trip-context');
   const ctxTripName = document.getElementById('ctx-trip-name');
 
   function selectTrip(id) {
     if (unsubTripDoc) unsubTripDoc();
+    if (unsubExpenses) unsubExpenses();
     currentTripId = id;
     unsubTripDoc = onSnapshot(doc(db, 'trips', id), (snap) => {
       if (!snap.exists()) return;
@@ -679,15 +748,25 @@
       setTripScopedNavEnabled(true);
       renderParticipants();
       renderRatesForm();
+      renderExpenseFormOptions();
+      renderExpensesFilters();
+      renderExpensesTable();
+    });
+    unsubExpenses = onSnapshot(collection(db, 'trips', id, 'expenses'), (snap) => {
+      currentExpenses = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      renderExpensesTable();
     });
     showScreen('participants');
   }
 
   document.getElementById('btn-back-to-trips').addEventListener('click', () => {
     if (unsubTripDoc) unsubTripDoc();
+    if (unsubExpenses) unsubExpenses();
     unsubTripDoc = null;
+    unsubExpenses = null;
     currentTripId = null;
     currentTripData = null;
+    currentExpenses = [];
     tripContextEl.style.display = 'none';
     setTripScopedNavEnabled(false);
     showScreen('trips-list');
@@ -1105,6 +1184,230 @@
       if (rates[c] !== undefined) input.value = rates[c].toFixed(6);
     });
   }
+
+  // ---------- المصاريف ----------
+  const expenseForm = document.getElementById('expense-form');
+  const expenseFormTitle = document.getElementById('expense-form-title');
+  const submitExpenseBtn = document.getElementById('btn-submit-expense');
+  const expCategory = document.getElementById('exp-category');
+  const expDate = document.getElementById('exp-date');
+  const expAmount = document.getElementById('exp-amount');
+  const expCurrency = document.getElementById('exp-currency');
+  const expPayer = document.getElementById('exp-payer');
+  const expParticipantsPicker = document.getElementById('expense-participants-picker');
+  let editingExpenseId = null;
+  expDate.value = new Date().toISOString().slice(0, 10);
+
+  function getParticipantById(id) {
+    return (currentTripData.participants || []).find((p) => p.id === id);
+  }
+
+  function participantName(id) {
+    const p = getParticipantById(id);
+    return p ? p.name : '(محذوف)';
+  }
+
+  function convertToSAR(amount, currency) {
+    if (currency === 'SAR') return amount;
+    const rate = (currentTripData.rates || {})[currency] || 0;
+    return amount * rate;
+  }
+
+  function renderExpenseFormOptions(preservedParticipantIds) {
+    if (!currentTripData) return;
+    const currencies = currentTripData.currencies || ['SAR'];
+    expCurrency.innerHTML = currencies.map((c) => `<option value="${c}">${currencyLabels[c] || c}</option>`).join('');
+
+    const active = (currentTripData.participants || []).filter((p) => p.status === 'active');
+    expPayer.innerHTML = active.map((p) => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('');
+
+    const preserved = preservedParticipantIds || [];
+    const extraClosed = (currentTripData.participants || []).filter(
+      (p) => p.status !== 'active' && preserved.includes(p.id)
+    );
+    const pickable = [...active, ...extraClosed];
+
+    expParticipantsPicker.innerHTML = pickable.map((p) => `
+      <div class="checkbox-row"><label style="display:flex;align-items:center;gap:8px;margin:0">
+        <input type="checkbox" class="exp-participant-cb" value="${p.id}" ${preserved.includes(p.id) ? 'checked' : ''}>
+        ${escapeHTML(p.name)}${p.status !== 'active' ? ' <span class="status-badge closed">مقفل</span>' : ''}
+      </label></div>
+    `).join('');
+  }
+
+  document.getElementById('btn-select-all-participants').addEventListener('click', () => {
+    expParticipantsPicker.querySelectorAll('.exp-participant-cb').forEach((cb) => { cb.checked = true; });
+  });
+
+  function resetExpenseForm() {
+    editingExpenseId = null;
+    expenseFormTitle.textContent = 'إضافة مصروف';
+    submitExpenseBtn.textContent = 'حفظ المصروف';
+    expenseForm.reset();
+    expDate.value = new Date().toISOString().slice(0, 10);
+    renderExpenseFormOptions();
+  }
+
+  document.getElementById('btn-goto-add-expense').addEventListener('click', () => {
+    resetExpenseForm();
+    showScreen('expense-add');
+  });
+  document.getElementById('btn-cancel-expense').addEventListener('click', () => {
+    resetExpenseForm();
+    showScreen('expenses-list');
+  });
+
+  expenseForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!currentTripId) return;
+
+    const desc = document.getElementById('exp-desc').value.trim();
+    const amount = parseFloat(expAmount.value);
+    const participantIds = [...expParticipantsPicker.querySelectorAll('.exp-participant-cb:checked')].map((cb) => cb.value);
+
+    if (!desc || !amount || amount <= 0) {
+      showToast('الرجاء إدخال وصف ومبلغ صحيح', true);
+      return;
+    }
+    if (!expPayer.value) {
+      showToast('الرجاء اختيار الدافع', true);
+      return;
+    }
+    if (!participantIds.length) {
+      showToast('الرجاء اختيار مشارك واحد على الأقل', true);
+      return;
+    }
+
+    const payload = {
+      desc,
+      category: expCategory.value,
+      amount,
+      currency: expCurrency.value,
+      date: expDate.value,
+      payerId: expPayer.value,
+      participantIds,
+      splitMethod: 'equal'
+    };
+
+    try {
+      if (editingExpenseId) {
+        await updateDoc(doc(db, 'trips', currentTripId, 'expenses', editingExpenseId), payload);
+        showToast('تم تحديث المصروف');
+      } else {
+        await addDoc(collection(db, 'trips', currentTripId, 'expenses'), { ...payload, createdAt: serverTimestamp() });
+        showToast('تم حفظ المصروف');
+      }
+      resetExpenseForm();
+      showScreen('expenses-list');
+    } catch (err) {
+      console.error('Expense save error:', err);
+      showToast('تعذّر حفظ المصروف', true);
+    }
+  });
+
+  // ---------- قائمة المصاريف: فلاتر وفرز ----------
+  const filterCategory = document.getElementById('filter-category');
+  const filterCurrency = document.getElementById('filter-currency');
+  const filterPerson = document.getElementById('filter-person');
+  const expensesEmpty = document.getElementById('expenses-empty');
+  const expensesTable = document.getElementById('expenses-table');
+  const expensesTbody = document.getElementById('expenses-tbody');
+  let sortKey = 'date';
+  let sortDir = 'desc';
+
+  function renderExpensesFilters() {
+    if (!currentTripData) return;
+    const categories = ['تذاكر', 'فيزا', 'سكن', 'مواصلات', 'أكل', 'زيارات', 'متفرقات'];
+    filterCategory.innerHTML = '<option value="">الكل</option>' + categories.map((c) => `<option value="${c}">${c}</option>`).join('');
+    const currencies = currentTripData.currencies || ['SAR'];
+    filterCurrency.innerHTML = '<option value="">الكل</option>' + currencies.map((c) => `<option value="${c}">${currencyLabels[c] || c}</option>`).join('');
+    const allParticipants = currentTripData.participants || [];
+    filterPerson.innerHTML = '<option value="">الكل</option>' + allParticipants.map((p) => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('');
+  }
+
+  [filterCategory, filterCurrency, filterPerson].forEach((el) => {
+    el.addEventListener('change', renderExpensesTable);
+  });
+
+  document.querySelectorAll('#expenses-table th[data-sort]').forEach((th) => {
+    th.addEventListener('click', () => {
+      const key = th.dataset.sort;
+      if (sortKey === key) {
+        sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortKey = key;
+        sortDir = 'asc';
+      }
+      renderExpensesTable();
+    });
+  });
+
+  function renderExpensesTable() {
+    if (!currentTripData) return;
+    let rows = currentExpenses.map((exp) => ({ ...exp, amountSAR: convertToSAR(exp.amount, exp.currency) }));
+
+    if (filterCategory.value) rows = rows.filter((r) => r.category === filterCategory.value);
+    if (filterCurrency.value) rows = rows.filter((r) => r.currency === filterCurrency.value);
+    if (filterPerson.value) rows = rows.filter((r) => (r.participantIds || []).includes(filterPerson.value));
+
+    rows.sort((a, b) => {
+      let av = a[sortKey], bv = b[sortKey];
+      if (sortKey === 'date') { av = av || ''; bv = bv || ''; }
+      const cmp = av > bv ? 1 : av < bv ? -1 : 0;
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+
+    if (!rows.length) {
+      expensesEmpty.style.display = 'block';
+      expensesTable.style.display = 'none';
+      return;
+    }
+    expensesEmpty.style.display = 'none';
+    expensesTable.style.display = 'table';
+
+    expensesTbody.innerHTML = rows.map((exp) => `
+      <tr data-id="${exp.id}">
+        <td>${exp.date || ''}</td>
+        <td>${escapeHTML(exp.desc || '')}</td>
+        <td>${escapeHTML(exp.category || '')}</td>
+        <td>${(exp.amount || 0).toLocaleString('ar-SA', { maximumFractionDigits: 2 })} ${currencyLabels[exp.currency] || exp.currency}
+            <div style="font-size:11px;color:var(--text-muted)">${exp.amountSAR.toLocaleString('ar-SA', { maximumFractionDigits: 2 })} ريال</div></td>
+        <td>${escapeHTML(participantName(exp.payerId))}</td>
+        <td>${(exp.participantIds || []).length} مشارك</td>
+        <td>
+          <button class="btn-icon" data-action="edit">تعديل</button>
+          <button class="btn-icon danger" data-action="delete">حذف</button>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  expensesTbody.addEventListener('click', async (e) => {
+    const tr = e.target.closest('tr');
+    if (!tr) return;
+    const expId = tr.dataset.id;
+    const action = e.target.dataset.action;
+
+    if (action === 'delete') {
+      if (!confirm('حذف هذا المصروف؟')) return;
+      await deleteDoc(doc(db, 'trips', currentTripId, 'expenses', expId));
+      showToast('تم حذف المصروف');
+    } else if (action === 'edit') {
+      const exp = currentExpenses.find((x) => x.id === expId);
+      if (!exp) return;
+      editingExpenseId = expId;
+      expenseFormTitle.textContent = 'تعديل مصروف';
+      submitExpenseBtn.textContent = 'تحديث المصروف';
+      document.getElementById('exp-desc').value = exp.desc || '';
+      expCategory.value = exp.category || 'متفرقات';
+      expDate.value = exp.date || '';
+      expAmount.value = exp.amount || '';
+      renderExpenseFormOptions(exp.participantIds || []);
+      expCurrency.value = exp.currency || 'SAR';
+      expPayer.value = exp.payerId || '';
+      showScreen('expense-add');
+    }
+  });
 </script>
 
 </body>
