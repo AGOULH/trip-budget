@@ -396,6 +396,8 @@
 
   .status-badge.active { background: #e6f6ea; color: var(--success); }
   .status-badge.closed { background: #f1f1f3; color: var(--text-muted); }
+  .status-badge.advance-due { background: #fdecea; color: var(--danger); }
+  .status-badge.advance-paid { background: #e6f6ea; color: var(--success); }
 
   .btn-icon {
     font-family: inherit;
@@ -604,7 +606,7 @@
 
       <div id="participants-empty" class="placeholder">لا يوجد مشاركون بعد. أضف مجموعة محفوظة أو شخصًا يدويًا.</div>
       <table class="data-table" id="participants-table" style="display:none">
-        <thead><tr><th>الاسم</th><th>الجوال</th><th>الحالة</th><th></th></tr></thead>
+        <thead><tr><th>الاسم</th><th>الجوال</th><th>الحالة</th><th>السلفة المستحقة</th><th></th></tr></thead>
         <tbody id="participants-tbody"></tbody>
       </table>
     </div>
@@ -621,6 +623,11 @@
       <form class="form-grid" id="manual-add-form">
         <div class="field"><label for="manual-name">الاسم</label><input type="text" id="manual-name" required></div>
         <div class="field"><label for="manual-phone">الجوال (اختياري)</label><input type="text" id="manual-phone"></div>
+        <div class="field full">
+          <label for="manual-advance">سلفة مستحقة عليه (ريال) — اختياري</label>
+          <input type="number" id="manual-advance" min="0" step="0.01" placeholder="مثال: مبلغ مقدّم لم يدفعه بعد">
+        </div>
+        <div class="full form-note">إذا كان هذا الشخص مطلوب منه دفع سلفة/مساهمة للصندوق ولم يدفعها بعد، رصيده سيظهر عليه بهذا المبلغ حتى تُحدَّد كمدفوعة.</div>
         <div class="full form-actions">
           <button type="submit" class="btn">إضافة</button>
           <button type="button" class="btn secondary" id="btn-cancel-manual">إلغاء</button>
@@ -1087,6 +1094,18 @@
   const participantsTbody = document.getElementById('participants-tbody');
   const treasurerSelect = document.getElementById('treasurer-select');
 
+  function advanceCellHTML(p) {
+    if (!p.advanceDueSAR) {
+      return `<button class="btn-icon" data-action="set-advance">+ سلفة</button>`;
+    }
+    const paid = !!p.advancePaid;
+    return `
+      <span class="status-badge ${paid ? 'advance-paid' : 'advance-due'}">${p.advanceDueSAR.toFixed(2)} ريال ${paid ? '(مدفوعة)' : '(عليه)'}</span>
+      <button class="btn-icon" data-action="toggle-advance">${paid ? 'إلغاء الدفع' : 'تحديد كمدفوعة'}</button>
+      <button class="btn-icon" data-action="edit-advance">تعديل</button>
+    `;
+  }
+
   function renderParticipants() {
     if (!currentTripData) return;
     const participants = currentTripData.participants || [];
@@ -1102,6 +1121,7 @@
           <td>${escapeHTML(p.name)}</td>
           <td>${escapeHTML(p.phone || '-')}</td>
           <td><span class="status-badge ${p.status}">${p.status === 'active' ? 'نشط' : 'مقفل'}</span></td>
+          <td>${advanceCellHTML(p)}</td>
           <td><button class="btn-icon danger" data-action="delete">حذف</button></td>
         </tr>
       `).join('');
@@ -1121,16 +1141,33 @@
   });
 
   participantsTbody.addEventListener('click', async (e) => {
-    const btn = e.target.closest('[data-action="delete"]');
+    const btn = e.target.closest('button');
     if (!btn || !currentTripData) return;
     const tr = btn.closest('tr');
     const pid = tr.dataset.id;
-    if (!confirm('حذف هذا المشارك من الرحلة؟')) return;
+    const action = btn.dataset.action;
 
-    const updated = (currentTripData.participants || []).filter((p) => p.id !== pid);
-    const patch = { participants: updated, updatedAt: serverTimestamp() };
-    if (currentTripData.treasurerId === pid) patch.treasurerId = null;
-    await updateDoc(doc(db, 'trips', currentTripId), patch);
+    if (action === 'delete') {
+      if (!confirm('حذف هذا المشارك من الرحلة؟')) return;
+      const updated = (currentTripData.participants || []).filter((p) => p.id !== pid);
+      const patch = { participants: updated, updatedAt: serverTimestamp() };
+      if (currentTripData.treasurerId === pid) patch.treasurerId = null;
+      await updateDoc(doc(db, 'trips', currentTripId), patch);
+    } else if (action === 'set-advance' || action === 'edit-advance') {
+      const p = getParticipantById(pid);
+      const input = prompt('مبلغ السلفة المستحقة عليه (ريال):', p && p.advanceDueSAR ? p.advanceDueSAR : '');
+      if (input === null) return;
+      const amount = parseFloat(input) || 0;
+      const updated = currentTripData.participants.map((x) =>
+        x.id === pid ? { ...x, advanceDueSAR: amount, advancePaid: amount > 0 ? false : true } : x
+      );
+      await updateDoc(doc(db, 'trips', currentTripId), { participants: updated, updatedAt: serverTimestamp() });
+    } else if (action === 'toggle-advance') {
+      const updated = currentTripData.participants.map((x) =>
+        x.id === pid ? { ...x, advancePaid: !x.advancePaid } : x
+      );
+      await updateDoc(doc(db, 'trips', currentTripId), { participants: updated, updatedAt: serverTimestamp() });
+    }
   });
 
   async function addMembersToTrip(members, sourceGroupId, isFullGroup) {
@@ -1141,7 +1178,9 @@
       phone: m.phone || null,
       status: 'active',
       closedAt: null,
-      closedStage: null
+      closedStage: null,
+      advanceDueSAR: m.advanceDueSAR || 0,
+      advancePaid: !(m.advanceDueSAR > 0)
     }));
     const existing = currentTripData.participants || [];
     const wasEmpty = existing.length === 0;
@@ -1234,7 +1273,8 @@
     const name = document.getElementById('manual-name').value.trim();
     if (!name) return;
     const phone = document.getElementById('manual-phone').value.trim();
-    await addMembersToTrip([{ name, phone }], null, false);
+    const advanceDueSAR = parseFloat(document.getElementById('manual-advance').value) || 0;
+    await addMembersToTrip([{ name, phone, advanceDueSAR }], null, false);
     manualForm.reset();
     addManualPanel.style.display = 'none';
   });
@@ -1427,6 +1467,17 @@
     return { rows, totalCheck };
   }
 
+  // سلفة مستحقة غير مدفوعة تُخصم من صافي الشخص حتى تُحدَّد كمدفوعة (منفصلة عن حساب المصاريف)
+  function advanceAdjustedRows(rows) {
+    return rows.map((r) => {
+      const p = getParticipantById(r.id);
+      const advanceDueSAR = (p && p.advanceDueSAR) || 0;
+      const advancePaid = !p || p.advancePaid !== false;
+      const adjustment = advanceDueSAR > 0 && !advancePaid ? -advanceDueSAR : 0;
+      return { ...r, advanceDueSAR, advancePaid, netSAR: r.netSAR + adjustment };
+    });
+  }
+
   // ---------- التسوية: عبر المحصّل + أقل تحويلات ----------
   function settlementViaTreasurer(rows, treasurerId) {
     if (!treasurerId) return [];
@@ -1504,14 +1555,14 @@
     }
 
     const { rows } = balancesSummary(currentExpenses);
-    const closingRows = rows.filter((r) => selectedIds.includes(r.id));
+    const closingRows = advanceAdjustedRows(rows).filter((r) => selectedIds.includes(r.id));
 
     closurePreviewTbody.innerHTML = closingRows.map((r) => `
       <tr>
         <td>${escapeHTML(r.name)}</td>
         <td>${roundSAR(r.paidSAR).toFixed(2)}</td>
         <td>${roundSAR(r.shareSAR).toFixed(2)}</td>
-        <td>${roundSAR(r.netSAR).toFixed(2)}</td>
+        <td>${roundSAR(r.netSAR).toFixed(2)}${r.advanceDueSAR && !r.advancePaid ? ` <span class="status-badge advance-due">سلفة غير مدفوعة ${r.advanceDueSAR.toFixed(2)}</span>` : ''}</td>
       </tr>
     `).join('');
 
@@ -1720,8 +1771,8 @@
       options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { color: '#eef1f2' } }, x: { grid: { display: false } } } }
     });
 
-    // ملخص التسوية الحالية (للنشطين فقط)
-    const settlementLinesActive = settlementViaTreasurer(activeRows, currentTripData.treasurerId);
+    // ملخص التسوية الحالية (للنشطين فقط، مع احتساب أي سلفة مستحقة غير مدفوعة)
+    const settlementLinesActive = settlementViaTreasurer(advanceAdjustedRows(activeRows), currentTripData.treasurerId);
     document.getElementById('dashboard-settlement').innerHTML = settlementLinesActive.length
       ? settlementLinesActive.map(settlementLineHTML).join('')
       : '<div class="placeholder">لا توجد تحويلات مطلوبة حاليًا.</div>';
@@ -1758,10 +1809,10 @@
       settlementLine = closure ? (closure.settlementLines || []).find((l) => l.fromId === participant.id || l.toId === participant.id) : null;
     } else {
       const { rows } = balancesSummary(currentExpenses);
-      const row = rows.find((r) => r.id === participant.id);
-      if (row) { paidSAR = row.paidSAR; shareSAR = row.shareSAR; netSAR = row.netSAR; }
       const active = (currentTripData.participants || []).filter((p) => p.status === 'active');
-      const activeRows = rows.filter((r) => active.some((p) => p.id === r.id));
+      const activeRows = advanceAdjustedRows(rows.filter((r) => active.some((p) => p.id === r.id)));
+      const row = activeRows.find((r) => r.id === participant.id);
+      if (row) { paidSAR = row.paidSAR; shareSAR = row.shareSAR; netSAR = row.netSAR; }
       const lines = settlementViaTreasurer(activeRows, currentTripData.treasurerId);
       settlementLine = lines.find((l) => l.fromId === participant.id || l.toId === participant.id) || null;
     }
@@ -1778,7 +1829,11 @@
       currencyTotals[e.currency].sar += myShareSAR;
     });
 
-    return { participant, isClosed, paidSAR, shareSAR, netSAR, settlementLine, relevantExpenses, categoryTotals, currencyTotals };
+    return {
+      participant, isClosed, paidSAR, shareSAR, netSAR, settlementLine, relevantExpenses, categoryTotals, currencyTotals,
+      advanceDueSAR: participant.advanceDueSAR || 0,
+      advancePaid: participant.advancePaid !== false
+    };
   }
 
   function settlementLineText(data) {
@@ -1814,6 +1869,7 @@
         <table style="width:100%;border-collapse:collapse;margin-bottom:16px" border="1" cellpadding="6">
           <tr><td>إجمالي ما دفعه</td><td>${roundSAR(data.paidSAR).toFixed(2)} ريال</td></tr>
           <tr><td>إجمالي نصيبه</td><td>${roundSAR(data.shareSAR).toFixed(2)} ريال</td></tr>
+          ${data.advanceDueSAR ? `<tr><td>سلفة مستحقة</td><td>${data.advanceDueSAR.toFixed(2)} ريال (${data.advancePaid ? 'مدفوعة' : 'غير مدفوعة'})</td></tr>` : ''}
           <tr><td>الصافي</td><td>${netAbs.toFixed(2)} ريال (${netLabel})</td></tr>
         </table>
         <h3>حسب التصنيف</h3>
@@ -1871,6 +1927,7 @@
           simpleTable(['البند', 'القيمة'], [
             ['إجمالي ما دفعه', roundSAR(data.paidSAR).toFixed(2) + ' ريال'],
             ['إجمالي نصيبه', roundSAR(data.shareSAR).toFixed(2) + ' ريال'],
+            ...(data.advanceDueSAR ? [['سلفة مستحقة', `${data.advanceDueSAR.toFixed(2)} ريال (${data.advancePaid ? 'مدفوعة' : 'غير مدفوعة'})`]] : []),
             ['الصافي', `${netAbs.toFixed(2)} ريال (${netLabel})`]
           ]),
           rtlPara(' '),
