@@ -8,6 +8,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
 <style>
   :root {
     --bg: #f4f6f8;
@@ -745,8 +748,18 @@
 
   <section id="reports" class="screen">
     <div class="card">
-      <h2>التقارير <span class="badge">قريبًا</span></h2>
-      <div class="placeholder">تقرير كل شخص وتقرير التسوية بصيغتَي Word وPDF.</div>
+      <h2>التقارير</h2>
+      <div class="field" style="max-width:320px">
+        <label for="report-person-select">اختر شخصًا</label>
+        <select id="report-person-select"></select>
+      </div>
+      <div class="form-actions">
+        <button class="btn secondary" id="btn-preview-report">معاينة التقرير</button>
+        <button class="btn secondary" id="btn-export-word">تصدير Word</button>
+        <button class="btn secondary" id="btn-export-pdf">تصدير PDF</button>
+        <button class="btn" id="btn-export-all">تصدير الكل (ZIP)</button>
+      </div>
+      <div id="report-preview" class="subcard" style="display:none"></div>
     </div>
   </section>
 
@@ -859,6 +872,7 @@
       renderClosurePicker();
       renderClosuresList();
       renderDashboard();
+      renderReportPersonSelect();
     });
     unsubExpenses = onSnapshot(collection(db, 'trips', id, 'expenses'), (snap) => {
       currentExpenses = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
@@ -1682,6 +1696,229 @@
       <div class="progress-bar"><div style="width:${pct}%"></div></div>
     `;
   }
+
+  // ---------- التقارير ----------
+  const reportPersonSelect = document.getElementById('report-person-select');
+  const reportPreview = document.getElementById('report-preview');
+
+  function renderReportPersonSelect() {
+    if (!currentTripData) return;
+    reportPersonSelect.innerHTML = (currentTripData.participants || [])
+      .map((p) => `<option value="${p.id}">${escapeHTML(p.name)}${p.status === 'closed' ? ' (مقفل)' : ''}</option>`)
+      .join('');
+  }
+
+  function buildPersonReportData(participant) {
+    const isClosed = participant.status === 'closed';
+    let paidSAR = 0, shareSAR = 0, netSAR = 0, settlementLine = null;
+    const relevantExpenses = currentExpenses.filter((e) => (e.participantIds || []).includes(participant.id));
+
+    if (isClosed) {
+      const closure = currentClosures.find((c) => (c.participantIds || []).includes(participant.id));
+      const snap = closure ? (closure.snapshot || []).find((s) => s.participantId === participant.id) : null;
+      if (snap) { paidSAR = snap.paidSAR; shareSAR = snap.shareSAR; netSAR = snap.netSAR; }
+      settlementLine = closure ? (closure.settlementLines || []).find((l) => l.fromId === participant.id || l.toId === participant.id) : null;
+    } else {
+      const { rows } = balancesSummary(currentExpenses);
+      const row = rows.find((r) => r.id === participant.id);
+      if (row) { paidSAR = row.paidSAR; shareSAR = row.shareSAR; netSAR = row.netSAR; }
+      const active = (currentTripData.participants || []).filter((p) => p.status === 'active');
+      const activeRows = rows.filter((r) => active.some((p) => p.id === r.id));
+      const lines = settlementViaTreasurer(activeRows, currentTripData.treasurerId);
+      settlementLine = lines.find((l) => l.fromId === participant.id || l.toId === participant.id) || null;
+    }
+
+    const categoryTotals = {};
+    const currencyTotals = {};
+    relevantExpenses.forEach((e) => {
+      const n = (e.participantIds || []).length || 1;
+      const amountSAR = convertToSAR(e.amount, e.currency);
+      const myShareSAR = amountSAR / n;
+      categoryTotals[e.category] = (categoryTotals[e.category] || 0) + myShareSAR;
+      if (!currencyTotals[e.currency]) currencyTotals[e.currency] = { original: 0, sar: 0 };
+      currencyTotals[e.currency].original += e.amount / n;
+      currencyTotals[e.currency].sar += myShareSAR;
+    });
+
+    return { participant, isClosed, paidSAR, shareSAR, netSAR, settlementLine, relevantExpenses, categoryTotals, currencyTotals };
+  }
+
+  function settlementLineText(data) {
+    if (!data.settlementLine) return 'لا توجد تحويلات مطلوبة';
+    const p = data.participant;
+    return data.settlementLine.fromId === p.id
+      ? `يحوّل ${roundSAR(data.settlementLine.amountSAR).toFixed(2)} ريال إلى ${participantName(data.settlementLine.toId)}`
+      : `يستلم ${roundSAR(data.settlementLine.amountSAR).toFixed(2)} ريال من ${participantName(data.settlementLine.fromId)}`;
+  }
+
+  function personReportHTML(data) {
+    const p = data.participant;
+    const netLabel = data.netSAR >= 0 ? 'له' : 'عليه';
+    const netAbs = Math.abs(roundSAR(data.netSAR));
+
+    const categoryRows = Object.entries(data.categoryTotals)
+      .map(([cat, v]) => `<tr><td>${escapeHTML(cat)}</td><td>${roundSAR(v).toFixed(2)}</td></tr>`).join('');
+    const currencyRows = Object.entries(data.currencyTotals)
+      .map(([cur, v]) => `<tr><td>${currencyLabels[cur] || cur}</td><td>${v.original.toFixed(2)}</td><td>${roundSAR(v.sar).toFixed(2)}</td></tr>`).join('');
+    const expenseRows = data.relevantExpenses.map((e) => {
+      const n = (e.participantIds || []).length || 1;
+      const myShareSAR = convertToSAR(e.amount, e.currency) / n;
+      return `<tr><td>${e.date || ''}</td><td>${escapeHTML(e.desc || '')}</td><td>${escapeHTML(e.category || '')}</td><td>${e.amount} ${currencyLabels[e.currency] || e.currency}</td><td>${roundSAR(myShareSAR).toFixed(2)} ريال</td></tr>`;
+    }).join('');
+
+    return `
+      <div style="font-family:Cairo,sans-serif;direction:rtl;text-align:right;padding:16px;max-width:760px;margin:0 auto;background:#fff;color:#1e2a2f">
+        <h2 style="margin-bottom:4px">تقرير: ${escapeHTML(p.name)}</h2>
+        <div style="color:#666;font-size:13px;margin-bottom:16px">
+          ${escapeHTML(currentTripData.name)} — ${currentTripData.year || ''}
+          ${data.isClosed ? `<span class="status-badge closed" style="margin-inline-start:8px">مقفل — ${escapeHTML(p.closedStage || '')}</span>` : ''}
+        </div>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:16px" border="1" cellpadding="6">
+          <tr><td>إجمالي ما دفعه</td><td>${roundSAR(data.paidSAR).toFixed(2)} ريال</td></tr>
+          <tr><td>إجمالي نصيبه</td><td>${roundSAR(data.shareSAR).toFixed(2)} ريال</td></tr>
+          <tr><td>الصافي</td><td>${netAbs.toFixed(2)} ريال (${netLabel})</td></tr>
+        </table>
+        <h3>حسب التصنيف</h3>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:16px" border="1" cellpadding="6">
+          <tr><th>التصنيف</th><th>نصيبه (ريال)</th></tr>${categoryRows}
+        </table>
+        <h3>حسب العملة الأصلية</h3>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:16px" border="1" cellpadding="6">
+          <tr><th>العملة</th><th>نصيبه بالعملة الأصلية</th><th>المكافئ بالريال</th></tr>${currencyRows}
+        </table>
+        <h3>مصاريفه</h3>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:16px" border="1" cellpadding="6">
+          <tr><th>التاريخ</th><th>الوصف</th><th>التصنيف</th><th>المبلغ</th><th>نصيبه</th></tr>${expenseRows}
+        </table>
+        <h3>التسوية</h3>
+        <div>${settlementLineText(data)}</div>
+      </div>
+    `;
+  }
+
+  async function buildPersonDocx(data) {
+    const { Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, HeadingLevel, AlignmentType, WidthType } = docx;
+    const p = data.participant;
+    const netLabel = data.netSAR >= 0 ? 'له' : 'عليه';
+    const netAbs = Math.abs(roundSAR(data.netSAR));
+
+    function rtlPara(text, opts = {}) {
+      return new Paragraph({
+        alignment: AlignmentType.RIGHT,
+        bidirectional: true,
+        heading: opts.heading,
+        children: [new TextRun({ text, bold: !!opts.bold })]
+      });
+    }
+    function simpleTable(headers, rows) {
+      const headerRow = new TableRow({ children: headers.map((h) => new TableCell({ children: [rtlPara(h, { bold: true })] })) });
+      const dataRows = rows.map((r) => new TableRow({ children: r.map((c) => new TableCell({ children: [rtlPara(String(c))] })) }));
+      return new Table({ width: { size: 100, type: WidthType.PERCENTAGE }, rows: [headerRow, ...dataRows] });
+    }
+
+    const categoryRows = Object.entries(data.categoryTotals).map(([cat, v]) => [cat, roundSAR(v).toFixed(2)]);
+    const currencyRows = Object.entries(data.currencyTotals).map(([cur, v]) => [currencyLabels[cur] || cur, v.original.toFixed(2), roundSAR(v.sar).toFixed(2)]);
+    const expenseRows = data.relevantExpenses.map((e) => {
+      const n = (e.participantIds || []).length || 1;
+      const myShareSAR = convertToSAR(e.amount, e.currency) / n;
+      return [e.date || '', e.desc || '', e.category || '', `${e.amount} ${currencyLabels[e.currency] || e.currency}`, roundSAR(myShareSAR).toFixed(2)];
+    });
+
+    const document = new Document({
+      sections: [{
+        children: [
+          rtlPara(`تقرير: ${p.name}`, { heading: HeadingLevel.HEADING_1 }),
+          rtlPara(`${currentTripData.name} — ${currentTripData.year || ''}${data.isClosed ? ' (مقفل — ' + (p.closedStage || '') + ')' : ''}`),
+          rtlPara(' '),
+          simpleTable(['البند', 'القيمة'], [
+            ['إجمالي ما دفعه', roundSAR(data.paidSAR).toFixed(2) + ' ريال'],
+            ['إجمالي نصيبه', roundSAR(data.shareSAR).toFixed(2) + ' ريال'],
+            ['الصافي', `${netAbs.toFixed(2)} ريال (${netLabel})`]
+          ]),
+          rtlPara(' '),
+          rtlPara('حسب التصنيف', { heading: HeadingLevel.HEADING_2 }),
+          simpleTable(['التصنيف', 'نصيبه (ريال)'], categoryRows),
+          rtlPara(' '),
+          rtlPara('حسب العملة الأصلية', { heading: HeadingLevel.HEADING_2 }),
+          simpleTable(['العملة', 'نصيبه بالعملة الأصلية', 'المكافئ بالريال'], currencyRows),
+          rtlPara(' '),
+          rtlPara('مصاريفه', { heading: HeadingLevel.HEADING_2 }),
+          simpleTable(['التاريخ', 'الوصف', 'التصنيف', 'المبلغ', 'نصيبه'], expenseRows),
+          rtlPara(' '),
+          rtlPara('التسوية', { heading: HeadingLevel.HEADING_2 }),
+          rtlPara(settlementLineText(data))
+        ]
+      }]
+    });
+
+    return Packer.toBlob(document);
+  }
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 2000);
+  }
+
+  document.getElementById('btn-preview-report').addEventListener('click', () => {
+    const p = getParticipantById(reportPersonSelect.value);
+    if (!p) return;
+    reportPreview.innerHTML = personReportHTML(buildPersonReportData(p));
+    reportPreview.style.display = 'block';
+  });
+
+  document.getElementById('btn-export-word').addEventListener('click', async () => {
+    const p = getParticipantById(reportPersonSelect.value);
+    if (!p) return;
+    const blob = await buildPersonDocx(buildPersonReportData(p));
+    downloadBlob(blob, `تقرير-${p.name}.docx`);
+  });
+
+  document.getElementById('btn-export-pdf').addEventListener('click', async () => {
+    const p = getParticipantById(reportPersonSelect.value);
+    if (!p) return;
+    reportPreview.innerHTML = personReportHTML(buildPersonReportData(p));
+    reportPreview.style.display = 'block';
+    await html2pdf().from(reportPreview).set({
+      margin: 10,
+      filename: `تقرير-${p.name}.pdf`,
+      html2canvas: { scale: 2 },
+      jsPDF: { unit: 'mm', format: 'a4' }
+    }).save();
+  });
+
+  document.getElementById('btn-export-all').addEventListener('click', async () => {
+    if (!currentTripData) return;
+    const participants = currentTripData.participants || [];
+    if (!participants.length) {
+      showToast('لا يوجد مشاركون', true);
+      return;
+    }
+    showToast('جارٍ تجهيز التقارير…');
+    const zip = new JSZip();
+    for (const p of participants) {
+      const data = buildPersonReportData(p);
+      const docxBlob = await buildPersonDocx(data);
+      zip.file(`${p.name}.docx`, docxBlob);
+
+      reportPreview.innerHTML = personReportHTML(data);
+      reportPreview.style.display = 'block';
+      const pdfBlob = await html2pdf().from(reportPreview).set({
+        margin: 10,
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'mm', format: 'a4' }
+      }).outputPdf('blob');
+      zip.file(`${p.name}.pdf`, pdfBlob);
+    }
+    const zipBlob = await zip.generateAsync({ type: 'blob' });
+    downloadBlob(zipBlob, `تقارير-${currentTripData.name}.zip`);
+    showToast('تم تصدير كل التقارير');
+  });
 
   function renderExpenseFormOptions(preservedParticipantIds) {
     if (!currentTripData) return;
