@@ -1213,6 +1213,54 @@
     return amount * rate;
   }
 
+  function roundSAR(n) {
+    return Math.round((n + Number.EPSILON) * 100) / 100;
+  }
+
+  // ---------- محرّك الحساب: الأرصدة ----------
+  // computeBalances(expensesList) -> Map participantId -> { paid, share }
+  // paid = مجموع ما دفعه بالريال عبر كل المصاريف التي يظهر فيها كدافع
+  // share = مجموع نصيبه بالريال (amountSAR / عدد المشاركين) عبر المصاريف التي شارك فيها
+  function computeBalances(expensesList) {
+    const balances = {};
+    (currentTripData.participants || []).forEach((p) => {
+      balances[p.id] = { paid: 0, share: 0 };
+    });
+
+    expensesList.forEach((exp) => {
+      const amountSAR = convertToSAR(exp.amount, exp.currency);
+      if (!balances[exp.payerId]) balances[exp.payerId] = { paid: 0, share: 0 };
+      balances[exp.payerId].paid += amountSAR;
+
+      const ids = exp.participantIds || [];
+      if (!ids.length) return;
+      const share = amountSAR / ids.length;
+      ids.forEach((pid) => {
+        if (!balances[pid]) balances[pid] = { paid: 0, share: 0 };
+        balances[pid].share += share;
+      });
+    });
+
+    return balances;
+  }
+
+  // balancesSummary(expensesList) -> { rows:[{id,name,paidSAR,shareSAR,netSAR}], totalCheck }
+  function balancesSummary(expensesList) {
+    const balances = computeBalances(expensesList);
+    const rows = Object.entries(balances).map(([id, b]) => ({
+      id,
+      name: participantName(id),
+      paidSAR: b.paid,
+      shareSAR: b.share,
+      netSAR: b.paid - b.share
+    }));
+    const totalCheck = rows.reduce((s, r) => s + r.netSAR, 0);
+    return { rows, totalCheck };
+  }
+
+  window.__calc = { computeBalances, balancesSummary, convertToSAR, roundSAR };
+  window.__state = { get currentTripData() { return currentTripData; }, get currentTripId() { return currentTripId; }, get currentExpenses() { return currentExpenses; } };
+
   function renderExpenseFormOptions(preservedParticipantIds) {
     if (!currentTripData) return;
     const currencies = currentTripData.currencies || ['SAR'];
