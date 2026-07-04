@@ -629,8 +629,35 @@
 
   <section id="closure" class="screen">
     <div class="card">
-      <h2>إقفال الميزانية <span class="badge">قريبًا</span></h2>
-      <div class="placeholder">اختيار مجموعة فرعية، معاينة الحساب النهائي، تجميد الرصيد وإعادة الفتح.</div>
+      <h2>إقفال الميزانية</h2>
+      <div class="field full">
+        <label for="closure-stage-label">وصف المرحلة (مثال: بعد الفيزا)</label>
+        <input type="text" id="closure-stage-label">
+      </div>
+      <label style="font-weight:600;display:block;margin:12px 0 8px">من ينسحب الآن؟ (من النشطين)</label>
+      <div id="closure-picker" class="placeholder">لا يوجد مشاركون نشطون.</div>
+      <div class="form-actions">
+        <button class="btn secondary" id="btn-preview-closure">معاينة الحساب والتسوية</button>
+      </div>
+
+      <div id="closure-preview" class="subcard" style="display:none">
+        <h3 style="margin-top:0">معاينة الحساب النهائي</h3>
+        <table class="data-table" id="closure-preview-table">
+          <thead><tr><th>الاسم</th><th>دفع (ريال)</th><th>نصيبه (ريال)</th><th>الصافي</th></tr></thead>
+          <tbody id="closure-preview-tbody"></tbody>
+        </table>
+        <h3>التسوية عبر المحصّل</h3>
+        <div id="closure-settlement-lines" class="placeholder">—</div>
+        <div class="form-actions">
+          <button class="btn" id="btn-confirm-closure">تأكيد الإقفال</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>سجلّ الإقفالات السابقة</h2>
+      <div id="closures-empty" class="placeholder">لا توجد إقفالات سابقة.</div>
+      <div id="closures-list"></div>
     </div>
   </section>
 
@@ -731,7 +758,9 @@
   let currentTripData = null;
   let unsubTripDoc = null;
   let unsubExpenses = null;
+  let unsubClosures = null;
   let currentExpenses = [];
+  let currentClosures = [];
 
   const tripContextEl = document.getElementById('trip-context');
   const ctxTripName = document.getElementById('ctx-trip-name');
@@ -739,6 +768,7 @@
   function selectTrip(id) {
     if (unsubTripDoc) unsubTripDoc();
     if (unsubExpenses) unsubExpenses();
+    if (unsubClosures) unsubClosures();
     currentTripId = id;
     unsubTripDoc = onSnapshot(doc(db, 'trips', id), (snap) => {
       if (!snap.exists()) return;
@@ -751,10 +781,16 @@
       renderExpenseFormOptions();
       renderExpensesFilters();
       renderExpensesTable();
+      renderClosurePicker();
+      renderClosuresList();
     });
     unsubExpenses = onSnapshot(collection(db, 'trips', id, 'expenses'), (snap) => {
       currentExpenses = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       renderExpensesTable();
+    });
+    unsubClosures = onSnapshot(collection(db, 'trips', id, 'closures'), (snap) => {
+      currentClosures = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      renderClosuresList();
     });
     showScreen('participants');
   }
@@ -762,11 +798,14 @@
   document.getElementById('btn-back-to-trips').addEventListener('click', () => {
     if (unsubTripDoc) unsubTripDoc();
     if (unsubExpenses) unsubExpenses();
+    if (unsubClosures) unsubClosures();
     unsubTripDoc = null;
     unsubExpenses = null;
+    unsubClosures = null;
     currentTripId = null;
     currentTripData = null;
     currentExpenses = [];
+    currentClosures = [];
     tripContextEl.style.display = 'none';
     setTripScopedNavEnabled(false);
     showScreen('trips-list');
@@ -1258,8 +1297,205 @@
     return { rows, totalCheck };
   }
 
-  window.__calc = { computeBalances, balancesSummary, convertToSAR, roundSAR };
+  // ---------- التسوية: عبر المحصّل + أقل تحويلات ----------
+  function settlementViaTreasurer(rows, treasurerId) {
+    if (!treasurerId) return [];
+    const lines = [];
+    rows.forEach((r) => {
+      const amt = roundSAR(Math.abs(r.netSAR));
+      if (amt <= 0 || r.id === treasurerId) return;
+      if (r.netSAR < 0) {
+        lines.push({ fromId: r.id, toId: treasurerId, amountSAR: amt });
+      } else {
+        lines.push({ fromId: treasurerId, toId: r.id, amountSAR: amt });
+      }
+    });
+    return lines;
+  }
+
+  function settlementFewestTransfers(rows) {
+    const debtors = rows.filter((r) => r.netSAR < -0.005).map((r) => ({ id: r.id, amt: -r.netSAR })).sort((a, b) => b.amt - a.amt);
+    const creditors = rows.filter((r) => r.netSAR > 0.005).map((r) => ({ id: r.id, amt: r.netSAR })).sort((a, b) => b.amt - a.amt);
+    const lines = [];
+    let i = 0, j = 0;
+    while (i < debtors.length && j < creditors.length) {
+      const pay = Math.min(debtors[i].amt, creditors[j].amt);
+      lines.push({ fromId: debtors[i].id, toId: creditors[j].id, amountSAR: roundSAR(pay) });
+      debtors[i].amt -= pay;
+      creditors[j].amt -= pay;
+      if (debtors[i].amt <= 0.005) i += 1;
+      if (creditors[j].amt <= 0.005) j += 1;
+    }
+    return lines;
+  }
+
+  function settlementLineHTML(line) {
+    return `<div class="stat-row"><span>${escapeHTML(participantName(line.fromId))} ← ${escapeHTML(participantName(line.toId))}</span><span>${roundSAR(line.amountSAR).toFixed(2)} ريال</span></div>`;
+  }
+
+  window.__calc = { computeBalances, balancesSummary, convertToSAR, roundSAR, settlementViaTreasurer, settlementFewestTransfers };
   window.__state = { get currentTripData() { return currentTripData; }, get currentTripId() { return currentTripId; }, get currentExpenses() { return currentExpenses; } };
+
+  // ---------- إقفال الميزانية الجزئي ----------
+  const closurePicker = document.getElementById('closure-picker');
+  const closurePreview = document.getElementById('closure-preview');
+  const closurePreviewTbody = document.getElementById('closure-preview-tbody');
+  const closureSettlementLines = document.getElementById('closure-settlement-lines');
+  const closureStageLabel = document.getElementById('closure-stage-label');
+
+  function renderClosurePicker() {
+    if (!currentTripData) return;
+    const active = (currentTripData.participants || []).filter((p) => p.status === 'active');
+    if (!active.length) {
+      closurePicker.innerHTML = '<div class="placeholder">لا يوجد مشاركون نشطون.</div>';
+      return;
+    }
+    closurePicker.innerHTML = active.map((p) => `
+      <div class="checkbox-row"><label style="display:flex;align-items:center;gap:8px;margin:0">
+        <input type="checkbox" class="closure-cb" value="${p.id}"> ${escapeHTML(p.name)}
+      </label></div>
+    `).join('');
+    closurePreview.style.display = 'none';
+  }
+
+  document.getElementById('btn-preview-closure').addEventListener('click', () => {
+    const selectedIds = [...closurePicker.querySelectorAll('.closure-cb:checked')].map((cb) => cb.value);
+    if (!closureStageLabel.value.trim()) {
+      showToast('الرجاء إدخال وصف المرحلة', true);
+      return;
+    }
+    if (!selectedIds.length) {
+      showToast('اختر مشاركًا واحدًا على الأقل', true);
+      return;
+    }
+    if (!currentTripData.treasurerId) {
+      showToast('حدد المحصّل أولًا من شاشة إدارة المشاركين', true);
+      return;
+    }
+
+    const { rows } = balancesSummary(currentExpenses);
+    const closingRows = rows.filter((r) => selectedIds.includes(r.id));
+
+    closurePreviewTbody.innerHTML = closingRows.map((r) => `
+      <tr>
+        <td>${escapeHTML(r.name)}</td>
+        <td>${roundSAR(r.paidSAR).toFixed(2)}</td>
+        <td>${roundSAR(r.shareSAR).toFixed(2)}</td>
+        <td>${roundSAR(r.netSAR).toFixed(2)}</td>
+      </tr>
+    `).join('');
+
+    const lines = settlementViaTreasurer(closingRows, currentTripData.treasurerId);
+    closureSettlementLines.innerHTML = lines.length
+      ? lines.map(settlementLineHTML).join('')
+      : '<div class="placeholder">لا توجد تحويلات مطلوبة (الأرصدة متوازنة أو الكل هو المحصّل).</div>';
+
+    closurePreview.style.display = 'block';
+    closurePreview.dataset.selectedIds = JSON.stringify(selectedIds);
+    closurePreview.dataset.settlementLines = JSON.stringify(lines);
+    closurePreview.dataset.snapshot = JSON.stringify(closingRows);
+  });
+
+  document.getElementById('btn-confirm-closure').addEventListener('click', async () => {
+    if (!currentTripId) return;
+    const selectedIds = JSON.parse(closurePreview.dataset.selectedIds || '[]');
+    const settlementLines = JSON.parse(closurePreview.dataset.settlementLines || '[]');
+    const closingRows = JSON.parse(closurePreview.dataset.snapshot || '[]');
+    const stageLabel = closureStageLabel.value.trim();
+
+    try {
+      await addDoc(collection(db, 'trips', currentTripId, 'closures'), {
+        participantIds: selectedIds,
+        stageLabel,
+        closedAt: serverTimestamp(),
+        snapshot: closingRows.map((r) => ({
+          participantId: r.id,
+          paidSAR: roundSAR(r.paidSAR),
+          shareSAR: roundSAR(r.shareSAR),
+          netSAR: roundSAR(r.netSAR)
+        })),
+        settlementLines,
+        collected: false,
+        reportGenerated: false
+      });
+
+      const updatedParticipants = (currentTripData.participants || []).map((p) =>
+        selectedIds.includes(p.id) ? { ...p, status: 'closed', closedAt: new Date(), closedStage: stageLabel } : p
+      );
+      await updateDoc(doc(db, 'trips', currentTripId), { participants: updatedParticipants, updatedAt: serverTimestamp() });
+
+      showToast('تم إقفال الميزانية للمحددين');
+      closureStageLabel.value = '';
+      closurePreview.style.display = 'none';
+    } catch (err) {
+      console.error('Closure error:', err);
+      showToast('تعذّر إقفال الميزانية', true);
+    }
+  });
+
+  // ---------- سجلّ الإقفالات ----------
+  const closuresEmpty = document.getElementById('closures-empty');
+  const closuresList = document.getElementById('closures-list');
+
+  function renderClosuresList() {
+    if (!currentClosures.length) {
+      closuresEmpty.style.display = 'block';
+      closuresList.innerHTML = '';
+      return;
+    }
+    closuresEmpty.style.display = 'none';
+    closuresList.innerHTML = currentClosures.map((c) => {
+      const names = (c.participantIds || []).map((id) => participantName(id)).join('، ');
+      const snapshotRows = (c.snapshot || []).map((s) => `
+        <tr>
+          <td>${escapeHTML(participantName(s.participantId))}</td>
+          <td>${(s.paidSAR || 0).toFixed(2)}</td>
+          <td>${(s.shareSAR || 0).toFixed(2)}</td>
+          <td>${(s.netSAR || 0).toFixed(2)}</td>
+        </tr>
+      `).join('');
+      const settlementHTML = (c.settlementLines || []).map(settlementLineHTML).join('') || '<div class="placeholder">لا توجد تحويلات.</div>';
+
+      return `
+        <div class="subcard" data-id="${c.id}">
+          <div class="toolbar">
+            <div><strong>${escapeHTML(c.stageLabel || '')}</strong> — ${escapeHTML(names)}</div>
+            <div style="display:flex;gap:8px">
+              <label style="display:flex;align-items:center;gap:6px;font-size:13px">
+                <input type="checkbox" class="closure-collected-cb" ${c.collected ? 'checked' : ''}> تم التحصيل
+              </label>
+              <button class="btn-icon danger" data-action="reopen">إعادة فتح</button>
+            </div>
+          </div>
+          <table class="data-table">
+            <thead><tr><th>الاسم</th><th>دفع</th><th>نصيبه</th><th>الصافي</th></tr></thead>
+            <tbody>${snapshotRows}</tbody>
+          </table>
+          <div style="margin-top:8px">${settlementHTML}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  closuresList.addEventListener('click', async (e) => {
+    const card = e.target.closest('[data-id]');
+    if (!card) return;
+    const closureId = card.dataset.id;
+
+    if (e.target.dataset.action === 'reopen') {
+      if (!confirm('إعادة فتح هذا الإقفال؟ سيعود المشاركون لحالة نشط وسيُحذف سجل الإقفال.')) return;
+      const closure = currentClosures.find((c) => c.id === closureId);
+      if (!closure) return;
+      const updatedParticipants = (currentTripData.participants || []).map((p) =>
+        (closure.participantIds || []).includes(p.id) ? { ...p, status: 'active', closedAt: null, closedStage: null } : p
+      );
+      await updateDoc(doc(db, 'trips', currentTripId), { participants: updatedParticipants, updatedAt: serverTimestamp() });
+      await deleteDoc(doc(db, 'trips', currentTripId, 'closures', closureId));
+      showToast('تمت إعادة الفتح');
+    } else if (e.target.classList.contains('closure-collected-cb')) {
+      await updateDoc(doc(db, 'trips', currentTripId, 'closures', closureId), { collected: e.target.checked });
+    }
+  });
 
   function renderExpenseFormOptions(preservedParticipantIds) {
     if (!currentTripData) return;
