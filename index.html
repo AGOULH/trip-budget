@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <style>
   :root {
     --bg: #f4f6f8;
@@ -422,6 +423,50 @@
     background: #fbfcfc;
   }
 
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+  }
+
+  .stat-tile {
+    background: #fbfcfc;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    text-align: center;
+  }
+
+  .stat-tile .value {
+    font-size: 24px;
+    font-weight: 800;
+    color: var(--primary-dark);
+  }
+
+  .stat-tile .label {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+
+  .chart-wrap {
+    position: relative;
+    height: 260px;
+  }
+
+  .progress-bar {
+    height: 10px;
+    background: #eef1f2;
+    border-radius: 999px;
+    overflow: hidden;
+    margin: 8px 0;
+  }
+
+  .progress-bar > div {
+    height: 100%;
+    background: var(--primary);
+  }
+
   footer.app-footer {
     text-align: center;
     font-size: 12px;
@@ -663,8 +708,38 @@
 
   <section id="dashboard" class="screen">
     <div class="card">
-      <h2>الداش بورد <span class="badge">قريبًا</span></h2>
-      <div class="placeholder">بطاقات ورسوم Chart.js لملخص الصرف والتسوية وحالة الإقفال.</div>
+      <h2>الداش بورد</h2>
+      <div class="stats-grid" id="dashboard-stats"></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">الصرف حسب التصنيف</h3>
+      <div class="chart-wrap"><canvas id="chart-category"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">الصرف حسب العملة الأصلية (بالريال المكافئ)</h3>
+      <div class="chart-wrap"><canvas id="chart-currency"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">دفع مقابل نصيب لكل شخص</h3>
+      <div class="chart-wrap"><canvas id="chart-paid-share"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">منحنى الصرف على الأيام</h3>
+      <div class="chart-wrap"><canvas id="chart-timeline"></canvas></div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">ملخص التسوية الحالية (لكل النشطين)</h3>
+      <div id="dashboard-settlement" class="placeholder">—</div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0">حالة الإقفال</h3>
+      <div id="dashboard-closure-status"></div>
     </div>
   </section>
 
@@ -783,14 +858,17 @@
       renderExpensesTable();
       renderClosurePicker();
       renderClosuresList();
+      renderDashboard();
     });
     unsubExpenses = onSnapshot(collection(db, 'trips', id, 'expenses'), (snap) => {
       currentExpenses = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       renderExpensesTable();
+      renderDashboard();
     });
     unsubClosures = onSnapshot(collection(db, 'trips', id, 'closures'), (snap) => {
       currentClosures = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
       renderClosuresList();
+      renderDashboard();
     });
     showScreen('participants');
   }
@@ -1496,6 +1574,114 @@
       await updateDoc(doc(db, 'trips', currentTripId, 'closures', closureId), { collected: e.target.checked });
     }
   });
+
+  // ---------- الداش بورد ----------
+  const CHART_GREEN = '#0d9467';
+  const CHART_GOLD = '#a9760f';
+  const charts = {};
+  window.__charts = charts;
+
+  function destroyChart(key) {
+    if (charts[key]) { charts[key].destroy(); delete charts[key]; }
+  }
+
+  function renderDashboard() {
+    if (!currentTripData || !document.getElementById('dashboard-stats')) return;
+
+    const participants = currentTripData.participants || [];
+    const active = participants.filter((p) => p.status === 'active');
+    const totalSAR = currentExpenses.reduce((s, e) => s + convertToSAR(e.amount, e.currency), 0);
+    const { rows } = balancesSummary(currentExpenses);
+    const activeRows = rows.filter((r) => active.some((p) => p.id === r.id));
+    const avgShare = activeRows.length ? activeRows.reduce((s, r) => s + r.shareSAR, 0) / activeRows.length : 0;
+
+    document.getElementById('dashboard-stats').innerHTML = `
+      <div class="stat-tile"><div class="value">${roundSAR(totalSAR).toLocaleString('ar-SA', { maximumFractionDigits: 2 })}</div><div class="label">إجمالي الصرف (ريال)</div></div>
+      <div class="stat-tile"><div class="value">${currentExpenses.length}</div><div class="label">عدد المصاريف</div></div>
+      <div class="stat-tile"><div class="value">${active.length}/${participants.length}</div><div class="label">نشط/الكل</div></div>
+      <div class="stat-tile"><div class="value">${roundSAR(avgShare).toLocaleString('ar-SA', { maximumFractionDigits: 2 })}</div><div class="label">نصيب الفرد الوسطي (ريال)</div></div>
+    `;
+
+    // الصرف حسب التصنيف
+    const categoryTotals = {};
+    currentExpenses.forEach((e) => {
+      categoryTotals[e.category] = (categoryTotals[e.category] || 0) + convertToSAR(e.amount, e.currency);
+    });
+    const catEntries = Object.entries(categoryTotals).sort((a, b) => b[1] - a[1]);
+    destroyChart('category');
+    charts.category = new Chart(document.getElementById('chart-category'), {
+      type: 'bar',
+      data: {
+        labels: catEntries.map(([k]) => k),
+        datasets: [{ label: 'الصرف (ريال)', data: catEntries.map(([, v]) => roundSAR(v)), backgroundColor: CHART_GREEN, borderRadius: 4, maxBarThickness: 28 }]
+      },
+      options: {
+        indexAxis: 'y',
+        plugins: { legend: { display: false } },
+        scales: { x: { beginAtZero: true, grid: { color: '#eef1f2' } }, y: { grid: { display: false } } }
+      }
+    });
+
+    // الصرف حسب العملة الأصلية (بالمكافئ)
+    const currencyTotals = {};
+    currentExpenses.forEach((e) => {
+      currencyTotals[e.currency] = (currencyTotals[e.currency] || 0) + convertToSAR(e.amount, e.currency);
+    });
+    const curEntries = Object.entries(currencyTotals);
+    destroyChart('currency');
+    charts.currency = new Chart(document.getElementById('chart-currency'), {
+      type: 'bar',
+      data: {
+        labels: curEntries.map(([k]) => currencyLabels[k] || k),
+        datasets: [{ label: 'المكافئ بالريال', data: curEntries.map(([, v]) => roundSAR(v)), backgroundColor: CHART_GREEN, borderRadius: 4, maxBarThickness: 40 }]
+      },
+      options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { color: '#eef1f2' } }, x: { grid: { display: false } } } }
+    });
+
+    // دفع مقابل نصيب لكل شخص
+    destroyChart('paidShare');
+    charts.paidShare = new Chart(document.getElementById('chart-paid-share'), {
+      type: 'bar',
+      data: {
+        labels: rows.map((r) => r.name),
+        datasets: [
+          { label: 'دفع', data: rows.map((r) => roundSAR(r.paidSAR)), backgroundColor: CHART_GREEN, borderRadius: 4, maxBarThickness: 24 },
+          { label: 'نصيبه', data: rows.map((r) => roundSAR(r.shareSAR)), backgroundColor: CHART_GOLD, borderRadius: 4, maxBarThickness: 24 }
+        ]
+      },
+      options: { plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true, grid: { color: '#eef1f2' } }, x: { grid: { display: false } } } }
+    });
+
+    // منحنى الصرف على الأيام
+    const byDate = {};
+    currentExpenses.forEach((e) => {
+      byDate[e.date] = (byDate[e.date] || 0) + convertToSAR(e.amount, e.currency);
+    });
+    const dates = Object.keys(byDate).sort();
+    destroyChart('timeline');
+    charts.timeline = new Chart(document.getElementById('chart-timeline'), {
+      type: 'line',
+      data: {
+        labels: dates,
+        datasets: [{ label: 'الصرف اليومي (ريال)', data: dates.map((d) => roundSAR(byDate[d])), borderColor: CHART_GREEN, backgroundColor: CHART_GREEN, borderWidth: 2, tension: 0.25, pointRadius: 3 }]
+      },
+      options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { color: '#eef1f2' } }, x: { grid: { display: false } } } }
+    });
+
+    // ملخص التسوية الحالية (للنشطين فقط)
+    const settlementLinesActive = settlementViaTreasurer(activeRows, currentTripData.treasurerId);
+    document.getElementById('dashboard-settlement').innerHTML = settlementLinesActive.length
+      ? settlementLinesActive.map(settlementLineHTML).join('')
+      : '<div class="placeholder">لا توجد تحويلات مطلوبة حاليًا.</div>';
+
+    // حالة الإقفال
+    const closedCount = participants.length - active.length;
+    const pct = participants.length ? Math.round((closedCount / participants.length) * 100) : 0;
+    document.getElementById('dashboard-closure-status').innerHTML = `
+      <div>${closedCount} مقفل من أصل ${participants.length}</div>
+      <div class="progress-bar"><div style="width:${pct}%"></div></div>
+    `;
+  }
 
   function renderExpenseFormOptions(preservedParticipantIds) {
     if (!currentTripData) return;
