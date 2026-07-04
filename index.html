@@ -241,6 +241,14 @@
     box-shadow: 0 2px 8px rgba(14,124,102,0.12);
   }
 
+  .trip-card .open-hint {
+    margin-top: 12px;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--primary);
+    text-align: left;
+  }
+
   .trip-card h3 {
     margin: 0 0 4px;
     font-size: 16px;
@@ -514,13 +522,13 @@
 <nav class="app-nav" id="app-nav">
   <button data-screen="trips-list" class="active">قائمة الرحلات</button>
   <button data-screen="trip-create">إنشاء رحلة</button>
-  <button data-screen="participants" disabled>إدارة المشاركين</button>
-  <button data-screen="expense-add" disabled>إضافة مصروف</button>
-  <button data-screen="expenses-list" disabled>قائمة المصاريف</button>
-  <button data-screen="closure" disabled>إقفال الميزانية</button>
-  <button data-screen="dashboard" disabled>الداش بورد</button>
-  <button data-screen="reports" disabled>التقارير</button>
-  <button data-screen="settings-rates" disabled>أسعار الصرف</button>
+  <button data-screen="participants" disabled title="اختر رحلة أولًا من قائمة الرحلات">إدارة المشاركين</button>
+  <button data-screen="expense-add" disabled title="اختر رحلة أولًا من قائمة الرحلات">إضافة مصروف</button>
+  <button data-screen="expenses-list" disabled title="اختر رحلة أولًا من قائمة الرحلات">قائمة المصاريف</button>
+  <button data-screen="closure" disabled title="اختر رحلة أولًا من قائمة الرحلات">إقفال الميزانية</button>
+  <button data-screen="dashboard" disabled title="اختر رحلة أولًا من قائمة الرحلات">الداش بورد</button>
+  <button data-screen="reports" disabled title="اختر رحلة أولًا من قائمة الرحلات">التقارير</button>
+  <button data-screen="settings-rates" disabled title="اختر رحلة أولًا من قائمة الرحلات">أسعار الصرف</button>
   <button data-screen="guide">دليل الاستخدام</button>
 </nav>
 
@@ -862,7 +870,10 @@
 
   function setTripScopedNavEnabled(enabled) {
     navButtons.forEach((b) => {
-      if (tripScopedScreens.includes(b.dataset.screen)) b.disabled = !enabled;
+      if (tripScopedScreens.includes(b.dataset.screen)) {
+        b.disabled = !enabled;
+        b.title = enabled ? '' : 'اختر رحلة أولًا من قائمة الرحلات';
+      }
     });
   }
   setTripScopedNavEnabled(false);
@@ -1030,6 +1041,7 @@
         <div class="stat-row"><span>المشاركون (نشط/الكل)</span><span>${activeCount}/${participants.length}</span></div>
         <div class="stat-row"><span>إجمالي الصرف (ريال)</span><span>0.00</span></div>
         <div class="currencies">${currencyChips}</div>
+        <div class="open-hint">افتح الرحلة ←</div>
       </div>
     `;
   }
