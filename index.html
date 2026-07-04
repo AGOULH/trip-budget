@@ -241,6 +241,29 @@
     box-shadow: 0 2px 8px rgba(14,124,102,0.12);
   }
 
+  .trip-card .trip-card-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+  }
+
+  .trip-card .btn-delete-trip {
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 6px;
+  }
+
+  .trip-card .btn-delete-trip:hover {
+    color: var(--danger);
+    background: #fdecea;
+  }
+
   .trip-card .open-hint {
     margin-top: 12px;
     font-size: 12px;
@@ -888,6 +911,7 @@
   // ---------- اختيار رحلة (سياق العمل) ----------
   let currentTripId = null;
   let currentTripData = null;
+  let currentTripsList = [];
   let unsubTripDoc = null;
   let unsubExpenses = null;
   let unsubClosures = null;
@@ -985,6 +1009,15 @@
       return;
     }
 
+    const normalizedName = name.replace(/\s+/g, ' ').toLowerCase();
+    const isDuplicate = currentTripsList.some(
+      (t) => (t.name || '').trim().replace(/\s+/g, ' ').toLowerCase() === normalizedName
+    );
+    if (isDuplicate) {
+      showToast('يوجد رحلة أخرى بنفس الاسم، الرجاء اختيار اسم مختلف', true);
+      return;
+    }
+
     const currencies = ['SAR'];
     const rates = {};
     if (curUsd.checked) {
@@ -1043,7 +1076,10 @@
 
     return `
       <div class="trip-card" data-id="${id}">
-        <h3>${escapeHTML(trip.name || 'بدون اسم')}</h3>
+        <div class="trip-card-head">
+          <h3>${escapeHTML(trip.name || 'بدون اسم')}</h3>
+          <button type="button" class="btn-delete-trip" data-action="delete-trip" title="حذف الرحلة">🗑</button>
+        </div>
         <div class="year">${trip.year || ''}</div>
         <div class="stat-row"><span>المشاركون (نشط/الكل)</span><span>${activeCount}/${participants.length}</span></div>
         <div class="stat-row"><span>إجمالي الصرف (ريال)</span><span>0.00</span></div>
@@ -1066,6 +1102,8 @@
       statusEl.classList.add('connected');
       statusText.textContent = `متصل بقاعدة البيانات (${snapshot.size} رحلة)`;
 
+      currentTripsList = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+
       if (snapshot.empty) {
         tripsEmpty.style.display = 'block';
         tripsGrid.innerHTML = '';
@@ -1073,7 +1111,7 @@
       }
 
       tripsEmpty.style.display = 'none';
-      tripsGrid.innerHTML = snapshot.docs.map((d) => tripCardHTML(d.id, d.data())).join('');
+      tripsGrid.innerHTML = currentTripsList.map((t) => tripCardHTML(t.id, t)).join('');
     },
     (err) => {
       statusEl.classList.add('error');
@@ -1082,7 +1120,35 @@
     }
   );
 
-  tripsGrid.addEventListener('click', (e) => {
+  async function deleteTripCascade(tripId) {
+    const expSnap = await getDocs(collection(db, 'trips', tripId, 'expenses'));
+    await Promise.all(expSnap.docs.map((d) => deleteDoc(d.ref)));
+    const closSnap = await getDocs(collection(db, 'trips', tripId, 'closures'));
+    await Promise.all(closSnap.docs.map((d) => deleteDoc(d.ref)));
+    await deleteDoc(doc(db, 'trips', tripId));
+  }
+
+  tripsGrid.addEventListener('click', async (e) => {
+    const deleteBtn = e.target.closest('[data-action="delete-trip"]');
+    if (deleteBtn) {
+      e.stopPropagation();
+      const card = deleteBtn.closest('.trip-card');
+      const tripId = card.dataset.id;
+      const trip = currentTripsList.find((t) => t.id === tripId);
+      const tripName = trip ? trip.name : '';
+      if (!confirm(`هل تريد حذف رحلة "${tripName}" نهائيًا؟ سيتم حذف كل مصاريفها وتقاريرها ولا يمكن التراجع.`)) return;
+      try {
+        await deleteTripCascade(tripId);
+        if (currentTripId === tripId) {
+          document.getElementById('btn-back-to-trips').click();
+        }
+        showToast('تم حذف الرحلة');
+      } catch (err) {
+        console.error('Trip delete error:', err);
+        showToast('تعذّر حذف الرحلة', true);
+      }
+      return;
+    }
     const card = e.target.closest('.trip-card');
     if (!card) return;
     selectTrip(card.dataset.id);
@@ -1416,6 +1482,10 @@
     return p ? p.name : '(محذوف)';
   }
 
+  function payerDisplayName(id) {
+    return id === 'ALL' ? 'محصّل من الكل' : participantName(id);
+  }
+
   function convertToSAR(amount, currency) {
     if (currency === 'SAR') return amount;
     const rate = (currentTripData.rates || {})[currency] || 0;
@@ -1438,10 +1508,22 @@
 
     expensesList.forEach((exp) => {
       const amountSAR = convertToSAR(exp.amount, exp.currency);
-      if (!balances[exp.payerId]) balances[exp.payerId] = { paid: 0, share: 0 };
-      balances[exp.payerId].paid += amountSAR;
-
       const ids = exp.participantIds || [];
+
+      if (exp.payerId === 'ALL') {
+        // محصّل من الكل: كل مشارك يُعتبر دافعًا لنصيبه بالضبط (بدون دين لهذا المصروف)
+        if (ids.length) {
+          const perPerson = amountSAR / ids.length;
+          ids.forEach((pid) => {
+            if (!balances[pid]) balances[pid] = { paid: 0, share: 0 };
+            balances[pid].paid += perPerson;
+          });
+        }
+      } else {
+        if (!balances[exp.payerId]) balances[exp.payerId] = { paid: 0, share: 0 };
+        balances[exp.payerId].paid += amountSAR;
+      }
+
       if (!ids.length) return;
       const share = amountSAR / ids.length;
       ids.forEach((pid) => {
@@ -2030,7 +2112,8 @@
       body: `من "قائمة الرحلات" اضغط "رحلة جديدة"، أدخل الاسم والسنة، وحدّد إذا كانت الرحلة
       تستخدم دولارًا أو دينارًا عراقيًا بجانب الريال (الريال هو العملة المرجعية دائمًا).
       إذا حدّدت عملة إضافية أدخل سعر صرفها مقابل الريال — تقدر تعدّله لاحقًا من شاشة
-      "أسعار الصرف".`
+      "أسعار الصرف". لا يُسمح بإنشاء رحلتين بنفس الاسم. لحذف رحلة نهائيًا (مع كل مصاريفها
+      وتقاريرها) اضغط أيقونة 🗑 على بطاقتها في "قائمة الرحلات" — هذا الإجراء لا يمكن التراجع عنه.`
     },
     {
       title: '٣) إدارة المشاركين وتحديد المحصّل',
@@ -2045,7 +2128,10 @@
       title: '٤) تسجيل المصاريف',
       body: `من "إضافة مصروف" سجّل كل مصروف بوصفه وتصنيفه ومبلغه وعملته وتاريخه ومن دفعه،
       ثم حدّد **فقط** من شارك في هذا المصروف تحديدًا (وليس كل المجموعة). المصروف يُقسّم
-      بالتساوي بين من حدّدتهم فقط. المشاركون المقفلون لا يظهرون كخيار في المصاريف الجديدة.`
+      بالتساوي بين من حدّدتهم فقط. المشاركون المقفلون لا يظهرون كخيار في المصاريف الجديدة.
+      في خانة "الدافع" يوجد خيار "محصّل من الكل" يُستخدم لو المبلغ اتدفع موزّعًا من كل
+      المشاركين مباشرة (مثل فاتورة أكل انقسمت وقت الدفع) — هذا الخيار لا يُنشئ أي دين على
+      أحد لهذا المصروف تحديدًا، بعكس اختيار شخص واحد كدافع.`
     },
     {
       title: '٥) الإقفال الجزئي عند انسحاب مجموعة',
@@ -2091,7 +2177,8 @@
     expCurrency.innerHTML = currencies.map((c) => `<option value="${c}">${currencyLabels[c] || c}</option>`).join('');
 
     const active = (currentTripData.participants || []).filter((p) => p.status === 'active');
-    expPayer.innerHTML = active.map((p) => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('');
+    expPayer.innerHTML = `<option value="ALL">محصّل من الكل (دفع موزّع بالتساوي — بدون دين)</option>`
+      + active.map((p) => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('');
 
     const preserved = preservedParticipantIds || [];
     const extraClosed = (currentTripData.participants || []).filter(
@@ -2244,7 +2331,7 @@
         <td>${escapeHTML(exp.category || '')}</td>
         <td>${(exp.amount || 0).toLocaleString('ar-SA', { maximumFractionDigits: 2 })} ${currencyLabels[exp.currency] || exp.currency}
             <div style="font-size:11px;color:var(--text-muted)">${exp.amountSAR.toLocaleString('ar-SA', { maximumFractionDigits: 2 })} ريال</div></td>
-        <td>${escapeHTML(participantName(exp.payerId))}</td>
+        <td>${escapeHTML(payerDisplayName(exp.payerId))}</td>
         <td>${(exp.participantIds || []).length} مشارك</td>
         <td>
           <button class="btn-icon" data-action="edit">تعديل</button>
