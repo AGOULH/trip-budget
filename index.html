@@ -584,8 +584,17 @@
 
   <section id="settings-rates" class="screen">
     <div class="card">
-      <h2>أسعار الصرف <span class="badge">قريبًا</span></h2>
-      <div class="placeholder">إدخال يدوي لأسعار USD وIQD مقابل الريال، مع خيار الجلب اللحظي.</div>
+      <div class="toolbar">
+        <h2 style="margin:0">أسعار الصرف</h2>
+        <button class="btn secondary" id="btn-fetch-rates">جلب السعر اللحظي</button>
+      </div>
+      <div id="rates-form" class="form-grid"></div>
+      <div class="form-actions">
+        <button class="btn" id="btn-save-rates">حفظ الأسعار</button>
+      </div>
+      <div class="form-note" style="margin-top:12px">
+        آخر تحديث: <span id="rates-updated-at">-</span> — المصدر: <span id="rates-source">-</span>
+      </div>
     </div>
   </section>
 
@@ -669,6 +678,7 @@
       ctxTripName.textContent = currentTripData.name || '';
       setTripScopedNavEnabled(true);
       renderParticipants();
+      renderRatesForm();
     });
     showScreen('participants');
   }
@@ -998,6 +1008,103 @@
     });
     showToast('تم حفظ المجموعة');
   });
+
+  // ---------- أسعار الصرف ----------
+  const ratesFormEl = document.getElementById('rates-form');
+  const ratesUpdatedAtEl = document.getElementById('rates-updated-at');
+  const ratesSourceEl = document.getElementById('rates-source');
+  const rateLabels = {
+    USD: 'سعر الدولار مقابل الريال (كم ريال = 1 دولار)',
+    IQD: 'سعر الدينار العراقي مقابل الريال (كم ريال = 1 دينار)'
+  };
+
+  let pendingRatesSource = 'manual';
+
+  function renderRatesForm() {
+    if (!currentTripData) return;
+    const nonBase = (currentTripData.currencies || []).filter((c) => c !== 'SAR');
+    const rates = currentTripData.rates || {};
+    pendingRatesSource = 'manual';
+
+    if (!nonBase.length) {
+      ratesFormEl.innerHTML = '<div class="full placeholder">هذه الرحلة تستخدم الريال السعودي فقط، لا حاجة لأسعار صرف.</div>';
+    } else {
+      ratesFormEl.innerHTML = nonBase.map((c) => `
+        <div class="field">
+          <label for="rate-input-${c}">${rateLabels[c] || c}</label>
+          <input type="number" id="rate-input-${c}" data-currency="${c}" step="0.000001" min="0" value="${rates[c] || ''}">
+        </div>
+      `).join('');
+      ratesFormEl.querySelectorAll('input[data-currency]').forEach((input) => {
+        input.addEventListener('input', () => { pendingRatesSource = 'manual'; });
+      });
+    }
+
+    const updatedAt = currentTripData.ratesUpdatedAt && currentTripData.ratesUpdatedAt.toDate
+      ? currentTripData.ratesUpdatedAt.toDate().toLocaleString('ar-SA')
+      : '-';
+    ratesUpdatedAtEl.textContent = updatedAt;
+    ratesSourceEl.textContent = currentTripData.ratesSource === 'api' ? 'جلب لحظي' : 'يدوي';
+  }
+
+  document.getElementById('btn-save-rates').addEventListener('click', async () => {
+    if (!currentTripId) return;
+    const inputs = ratesFormEl.querySelectorAll('input[data-currency]');
+    const rates = { ...(currentTripData.rates || {}) };
+    inputs.forEach((input) => {
+      rates[input.dataset.currency] = parseFloat(input.value) || 0;
+    });
+    await updateDoc(doc(db, 'trips', currentTripId), {
+      rates,
+      ratesSource: pendingRatesSource,
+      ratesUpdatedAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    showToast('تم حفظ أسعار الصرف');
+  });
+
+  document.getElementById('btn-fetch-rates').addEventListener('click', async () => {
+    if (!currentTripId || !currentTripData) return;
+    const nonBase = (currentTripData.currencies || []).filter((c) => c !== 'SAR');
+    if (!nonBase.length) {
+      showToast('لا توجد عملات لجلب أسعارها', true);
+      return;
+    }
+    try {
+      const res = await fetch('https://open.er-api.com/v6/latest/SAR');
+      const data = await res.json();
+      if (!data.rates) throw new Error('bad response');
+
+      const rates = { ...(currentTripData.rates || {}) };
+      const missing = [];
+      nonBase.forEach((c) => {
+        if (data.rates[c]) {
+          rates[c] = 1 / data.rates[c];
+        } else {
+          missing.push(c);
+        }
+      });
+
+      renderRatesFormWithValues(rates);
+      pendingRatesSource = missing.length ? 'manual' : 'api';
+      if (missing.length) {
+        showToast(`تعذّر جلب سعر: ${missing.join(', ')} — أدخله يدويًا`, true);
+      } else {
+        showToast('تم جلب الأسعار، راجعها ثم احفظ');
+      }
+    } catch (err) {
+      console.error('Rate fetch error:', err);
+      showToast('تعذّر الاتصال بخدمة أسعار الصرف', true);
+    }
+  });
+
+  function renderRatesFormWithValues(rates) {
+    const inputs = ratesFormEl.querySelectorAll('input[data-currency]');
+    inputs.forEach((input) => {
+      const c = input.dataset.currency;
+      if (rates[c] !== undefined) input.value = rates[c].toFixed(6);
+    });
+  }
 </script>
 
 </body>
