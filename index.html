@@ -112,6 +112,22 @@
     border-bottom-color: var(--primary);
   }
 
+  nav.app-nav button:disabled {
+    opacity: .35;
+    cursor: not-allowed;
+  }
+
+  .trip-context {
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: #eafaf5;
+    border-bottom: 1px solid var(--border);
+    padding: 10px 24px;
+    font-size: 14px;
+  }
+
   main {
     flex: 1;
     padding: 24px;
@@ -212,6 +228,13 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 18px;
+    cursor: pointer;
+    transition: box-shadow .15s, border-color .15s;
+  }
+
+  .trip-card:hover {
+    border-color: var(--primary);
+    box-shadow: 0 2px 8px rgba(14,124,102,0.12);
   }
 
   .trip-card h3 {
@@ -334,6 +357,71 @@
   .toast.show { opacity: 1; }
   .toast.error { background: var(--danger); }
 
+  table.data-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+
+  table.data-table th, table.data-table td {
+    padding: 10px 8px;
+    border-bottom: 1px solid var(--border);
+    text-align: right;
+  }
+
+  table.data-table th {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .status-badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 999px;
+  }
+
+  .status-badge.active { background: #e6f6ea; color: var(--success); }
+  .status-badge.closed { background: #f1f1f3; color: var(--text-muted); }
+
+  .btn-icon {
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    border: 1px solid var(--border);
+    background: #fff;
+    border-radius: 6px;
+    padding: 5px 10px;
+    cursor: pointer;
+    margin-inline-end: 4px;
+  }
+
+  .btn-icon.danger { color: var(--danger); border-color: #f2c6bf; }
+  .btn-icon.danger:hover { background: #fdf1ef; }
+  .btn-icon:not(.danger):hover { background: #f4f6f8; }
+
+  .group-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+
+  .group-row strong { flex: 1; }
+
+  .subcard {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    margin-top: 12px;
+    background: #fbfcfc;
+  }
+
   footer.app-footer {
     text-align: center;
     font-size: 12px;
@@ -352,14 +440,20 @@
 <nav class="app-nav" id="app-nav">
   <button data-screen="trips-list" class="active">قائمة الرحلات</button>
   <button data-screen="trip-create">إنشاء رحلة</button>
-  <button data-screen="participants">إدارة المشاركين</button>
-  <button data-screen="expense-add">إضافة مصروف</button>
-  <button data-screen="expenses-list">قائمة المصاريف</button>
-  <button data-screen="closure">إقفال الميزانية</button>
-  <button data-screen="dashboard">الداش بورد</button>
-  <button data-screen="reports">التقارير</button>
-  <button data-screen="settings-rates">أسعار الصرف</button>
+  <button data-screen="participants" disabled>إدارة المشاركين</button>
+  <button data-screen="expense-add" disabled>إضافة مصروف</button>
+  <button data-screen="expenses-list" disabled>قائمة المصاريف</button>
+  <button data-screen="closure" disabled>إقفال الميزانية</button>
+  <button data-screen="dashboard" disabled>الداش بورد</button>
+  <button data-screen="reports" disabled>التقارير</button>
+  <button data-screen="settings-rates" disabled>أسعار الصرف</button>
+  <button data-screen="guide">دليل الاستخدام</button>
 </nav>
+
+<div class="trip-context" id="trip-context">
+  <span>الرحلة الحالية: <strong id="ctx-trip-name"></strong></span>
+  <button class="btn secondary" id="btn-back-to-trips">← رجوع لقائمة الرحلات</button>
+</div>
 
 <main>
   <section id="trips-list" class="screen active">
@@ -412,8 +506,44 @@
 
   <section id="participants" class="screen">
     <div class="card">
-      <h2>إدارة المشاركين <span class="badge">قريبًا</span></h2>
-      <div class="placeholder">إضافة/حذف المشاركين، حالة نشط/مقفل، وحفظ كمجموعة جديدة.</div>
+      <div class="toolbar">
+        <h2 style="margin:0">إدارة المشاركين</h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn secondary" id="btn-add-group">+ من مجموعة محفوظة</button>
+          <button class="btn secondary" id="btn-add-manual">+ إضافة يدوي</button>
+          <button class="btn secondary" id="btn-save-group">حفظ كمجموعة جديدة</button>
+        </div>
+      </div>
+
+      <div class="field" style="max-width:320px;margin-bottom:20px">
+        <label for="treasurer-select">المحصّل (أمين الصندوق)</label>
+        <select id="treasurer-select"></select>
+      </div>
+
+      <div id="participants-empty" class="placeholder">لا يوجد مشاركون بعد. أضف مجموعة محفوظة أو شخصًا يدويًا.</div>
+      <table class="data-table" id="participants-table" style="display:none">
+        <thead><tr><th>الاسم</th><th>الجوال</th><th>الحالة</th><th></th></tr></thead>
+        <tbody id="participants-tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="card subcard" id="add-group-panel" style="display:none">
+      <h3 style="margin-top:0">اختر مجموعة محفوظة</h3>
+      <div id="groups-list"></div>
+      <div id="group-members-picker"></div>
+      <div class="form-actions"><button class="btn secondary" id="btn-close-group-panel">إغلاق</button></div>
+    </div>
+
+    <div class="card subcard" id="add-manual-panel" style="display:none">
+      <h3 style="margin-top:0">إضافة شخص يدويًا</h3>
+      <form class="form-grid" id="manual-add-form">
+        <div class="field"><label for="manual-name">الاسم</label><input type="text" id="manual-name" required></div>
+        <div class="field"><label for="manual-phone">الجوال (اختياري)</label><input type="text" id="manual-phone"></div>
+        <div class="full form-actions">
+          <button type="submit" class="btn">إضافة</button>
+          <button type="button" class="btn secondary" id="btn-cancel-manual">إلغاء</button>
+        </div>
+      </form>
     </div>
   </section>
 
@@ -458,6 +588,13 @@
       <div class="placeholder">إدخال يدوي لأسعار USD وIQD مقابل الريال، مع خيار الجلب اللحظي.</div>
     </div>
   </section>
+
+  <section id="guide" class="screen">
+    <div class="card">
+      <h2>دليل الاستخدام <span class="badge">قريبًا</span></h2>
+      <div class="placeholder">شرح خطوات العمل الكاملة سيُضاف هنا مع كل ميزة جديدة.</div>
+    </div>
+  </section>
 </main>
 
 <footer class="app-footer">حاسبة ميزانية الرحلات الجماعية — نسخة أولية</footer>
@@ -468,7 +605,8 @@
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
   import {
     getFirestore, collection, addDoc, onSnapshot,
-    query, orderBy, serverTimestamp
+    query, orderBy, serverTimestamp,
+    doc, updateDoc, getDoc, getDocs
   } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 
   const firebaseConfig = {
@@ -489,6 +627,7 @@
   // ---------- التنقّل بين الشاشات ----------
   const navButtons = document.querySelectorAll('#app-nav button');
   const screens = document.querySelectorAll('.screen');
+  const tripScopedScreens = ['participants', 'expense-add', 'expenses-list', 'closure', 'dashboard', 'reports', 'settings-rates'];
 
   function showScreen(screenId) {
     navButtons.forEach((b) => b.classList.toggle('active', b.dataset.screen === screenId));
@@ -496,11 +635,53 @@
   }
 
   navButtons.forEach((btn) => {
-    btn.addEventListener('click', () => showScreen(btn.dataset.screen));
+    btn.addEventListener('click', () => {
+      if (btn.disabled) return;
+      showScreen(btn.dataset.screen);
+    });
   });
 
   document.getElementById('btn-new-trip').addEventListener('click', () => showScreen('trip-create'));
   document.getElementById('btn-cancel-create').addEventListener('click', () => showScreen('trips-list'));
+
+  function setTripScopedNavEnabled(enabled) {
+    navButtons.forEach((b) => {
+      if (tripScopedScreens.includes(b.dataset.screen)) b.disabled = !enabled;
+    });
+  }
+  setTripScopedNavEnabled(false);
+
+  // ---------- اختيار رحلة (سياق العمل) ----------
+  let currentTripId = null;
+  let currentTripData = null;
+  let unsubTripDoc = null;
+
+  const tripContextEl = document.getElementById('trip-context');
+  const ctxTripName = document.getElementById('ctx-trip-name');
+
+  function selectTrip(id) {
+    if (unsubTripDoc) unsubTripDoc();
+    currentTripId = id;
+    unsubTripDoc = onSnapshot(doc(db, 'trips', id), (snap) => {
+      if (!snap.exists()) return;
+      currentTripData = { id: snap.id, ...snap.data() };
+      tripContextEl.style.display = 'flex';
+      ctxTripName.textContent = currentTripData.name || '';
+      setTripScopedNavEnabled(true);
+      renderParticipants();
+    });
+    showScreen('participants');
+  }
+
+  document.getElementById('btn-back-to-trips').addEventListener('click', () => {
+    if (unsubTripDoc) unsubTripDoc();
+    unsubTripDoc = null;
+    currentTripId = null;
+    currentTripData = null;
+    tripContextEl.style.display = 'none';
+    setTripScopedNavEnabled(false);
+    showScreen('trips-list');
+  });
 
   // ---------- تنبيه سريع ----------
   const toastEl = document.getElementById('toast');
@@ -589,7 +770,7 @@
   const tripsEmpty = document.getElementById('trips-empty');
   const currencyLabels = { SAR: 'ريال', USD: 'دولار', IQD: 'دينار عراقي' };
 
-  function tripCardHTML(trip) {
+  function tripCardHTML(id, trip) {
     const participants = trip.participants || [];
     const activeCount = participants.filter((p) => p.status === 'active').length;
     const currencyChips = (trip.currencies || ['SAR'])
@@ -597,7 +778,7 @@
       .join('');
 
     return `
-      <div class="trip-card">
+      <div class="trip-card" data-id="${id}">
         <h3>${escapeHTML(trip.name || 'بدون اسم')}</h3>
         <div class="year">${trip.year || ''}</div>
         <div class="stat-row"><span>المشاركون (نشط/الكل)</span><span>${activeCount}/${participants.length}</span></div>
@@ -627,7 +808,7 @@
       }
 
       tripsEmpty.style.display = 'none';
-      tripsGrid.innerHTML = snapshot.docs.map((d) => tripCardHTML(d.data())).join('');
+      tripsGrid.innerHTML = snapshot.docs.map((d) => tripCardHTML(d.id, d.data())).join('');
     },
     (err) => {
       statusEl.classList.add('error');
@@ -635,6 +816,188 @@
       console.error('Firestore connection error:', err);
     }
   );
+
+  tripsGrid.addEventListener('click', (e) => {
+    const card = e.target.closest('.trip-card');
+    if (!card) return;
+    selectTrip(card.dataset.id);
+  });
+
+  // ---------- إدارة المشاركين ----------
+  const participantsEmpty = document.getElementById('participants-empty');
+  const participantsTable = document.getElementById('participants-table');
+  const participantsTbody = document.getElementById('participants-tbody');
+  const treasurerSelect = document.getElementById('treasurer-select');
+
+  function renderParticipants() {
+    if (!currentTripData) return;
+    const participants = currentTripData.participants || [];
+
+    if (!participants.length) {
+      participantsEmpty.style.display = 'block';
+      participantsTable.style.display = 'none';
+    } else {
+      participantsEmpty.style.display = 'none';
+      participantsTable.style.display = 'table';
+      participantsTbody.innerHTML = participants.map((p) => `
+        <tr data-id="${p.id}">
+          <td>${escapeHTML(p.name)}</td>
+          <td>${escapeHTML(p.phone || '-')}</td>
+          <td><span class="status-badge ${p.status}">${p.status === 'active' ? 'نشط' : 'مقفل'}</span></td>
+          <td><button class="btn-icon danger" data-action="delete">حذف</button></td>
+        </tr>
+      `).join('');
+    }
+
+    const active = participants.filter((p) => p.status === 'active');
+    treasurerSelect.innerHTML = '<option value="">— اختر —</option>' +
+      active.map((p) => `<option value="${p.id}" ${p.id === currentTripData.treasurerId ? 'selected' : ''}>${escapeHTML(p.name)}</option>`).join('');
+  }
+
+  treasurerSelect.addEventListener('change', async () => {
+    if (!currentTripId) return;
+    await updateDoc(doc(db, 'trips', currentTripId), {
+      treasurerId: treasurerSelect.value || null,
+      updatedAt: serverTimestamp()
+    });
+  });
+
+  participantsTbody.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-action="delete"]');
+    if (!btn || !currentTripData) return;
+    const tr = btn.closest('tr');
+    const pid = tr.dataset.id;
+    if (!confirm('حذف هذا المشارك من الرحلة؟')) return;
+
+    const updated = (currentTripData.participants || []).filter((p) => p.id !== pid);
+    const patch = { participants: updated, updatedAt: serverTimestamp() };
+    if (currentTripData.treasurerId === pid) patch.treasurerId = null;
+    await updateDoc(doc(db, 'trips', currentTripId), patch);
+  });
+
+  async function addMembersToTrip(members, sourceGroupId, isFullGroup) {
+    if (!members.length) return;
+    const newParticipants = members.map((m) => ({
+      id: crypto.randomUUID(),
+      name: m.name,
+      phone: m.phone || null,
+      status: 'active',
+      closedAt: null,
+      closedStage: null
+    }));
+    const existing = currentTripData.participants || [];
+    const wasEmpty = existing.length === 0;
+    const patch = { participants: [...existing, ...newParticipants], updatedAt: serverTimestamp() };
+    if (isFullGroup && wasEmpty) patch.sourceGroupId = sourceGroupId;
+    await updateDoc(doc(db, 'trips', currentTripId), patch);
+    showToast(`تمت إضافة ${newParticipants.length} مشارك`);
+  }
+
+  // ---------- إضافة من مجموعة محفوظة ----------
+  const addGroupPanel = document.getElementById('add-group-panel');
+  const groupsListEl = document.getElementById('groups-list');
+  const groupMembersPicker = document.getElementById('group-members-picker');
+  let cachedGroups = [];
+
+  document.getElementById('btn-add-group').addEventListener('click', async () => {
+    addGroupPanel.style.display = 'block';
+    groupMembersPicker.innerHTML = '';
+    groupsListEl.innerHTML = '<div class="placeholder">جارٍ التحميل…</div>';
+    const snap = await getDocs(collection(db, 'groups'));
+    cachedGroups = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    renderGroupsList();
+  });
+
+  document.getElementById('btn-close-group-panel').addEventListener('click', () => {
+    addGroupPanel.style.display = 'none';
+  });
+
+  function renderGroupsList() {
+    if (!cachedGroups.length) {
+      groupsListEl.innerHTML = '<div class="placeholder">لا توجد مجموعات محفوظة بعد. أنشئ رحلة بمشاركين ثم اضغط "حفظ كمجموعة جديدة".</div>';
+      return;
+    }
+    groupsListEl.innerHTML = cachedGroups.map((g) => `
+      <div class="group-row" data-id="${g.id}">
+        <strong>${escapeHTML(g.name)}</strong>
+        <span style="color:var(--text-muted);font-size:12px">${(g.members || []).length} أشخاص</span>
+        <button class="btn secondary" data-action="add-all">إضافة الكل</button>
+        <button class="btn secondary" data-action="pick">اختيار أشخاص</button>
+      </div>
+    `).join('');
+  }
+
+  groupsListEl.addEventListener('click', (e) => {
+    const row = e.target.closest('.group-row');
+    if (!row) return;
+    const group = cachedGroups.find((g) => g.id === row.dataset.id);
+    if (!group) return;
+    const action = e.target.dataset.action;
+    if (action === 'add-all') {
+      addMembersToTrip(group.members || [], group.id, true);
+      addGroupPanel.style.display = 'none';
+    } else if (action === 'pick') {
+      renderMemberPicker(group);
+    }
+  });
+
+  function renderMemberPicker(group) {
+    const members = group.members || [];
+    groupMembersPicker.innerHTML = `
+      <div class="subcard">
+        <div style="font-weight:700;margin-bottom:8px">اختر أشخاصًا من "${escapeHTML(group.name)}"</div>
+        ${members.map((m, i) => `<div class="checkbox-row"><label style="display:flex;align-items:center;gap:8px;margin:0"><input type="checkbox" class="pick-member" value="${i}" checked> ${escapeHTML(m.name)}</label></div>`).join('')}
+        <div class="form-actions"><button class="btn" id="btn-add-picked">إضافة المحددين</button></div>
+      </div>
+    `;
+    document.getElementById('btn-add-picked').addEventListener('click', () => {
+      const checked = [...groupMembersPicker.querySelectorAll('.pick-member:checked')]
+        .map((cb) => members[parseInt(cb.value, 10)]);
+      addMembersToTrip(checked, group.id, false);
+      addGroupPanel.style.display = 'none';
+      groupMembersPicker.innerHTML = '';
+    });
+  }
+
+  // ---------- إضافة شخص يدويًا ----------
+  const addManualPanel = document.getElementById('add-manual-panel');
+  const manualForm = document.getElementById('manual-add-form');
+
+  document.getElementById('btn-add-manual').addEventListener('click', () => {
+    addManualPanel.style.display = 'block';
+  });
+  document.getElementById('btn-cancel-manual').addEventListener('click', () => {
+    addManualPanel.style.display = 'none';
+    manualForm.reset();
+  });
+
+  manualForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = document.getElementById('manual-name').value.trim();
+    if (!name) return;
+    const phone = document.getElementById('manual-phone').value.trim();
+    await addMembersToTrip([{ name, phone }], null, false);
+    manualForm.reset();
+    addManualPanel.style.display = 'none';
+  });
+
+  // ---------- حفظ كمجموعة جديدة ----------
+  document.getElementById('btn-save-group').addEventListener('click', async () => {
+    if (!currentTripData || !(currentTripData.participants || []).length) {
+      showToast('لا يوجد مشاركون لحفظهم', true);
+      return;
+    }
+    const name = prompt('اسم المجموعة الجديدة:');
+    if (!name || !name.trim()) return;
+    const members = currentTripData.participants.map((p) => ({ id: p.id, name: p.name, phone: p.phone || null }));
+    await addDoc(collection(db, 'groups'), {
+      name: name.trim(),
+      members,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    showToast('تم حفظ المجموعة');
+  });
 </script>
 
 </body>
