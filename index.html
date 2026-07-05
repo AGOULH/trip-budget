@@ -1540,12 +1540,15 @@
     return { rows, totalCheck };
   }
 
-  // سلفة/مبلغ مقدّم من الشخص وقت التسجيل يُحتسب كأنه مدفوع فورًا (يُضاف لما دفعه وصافيه)
+  // المبلغ المدفوع مسبقًا (قبل الرحلة) يحل محل "ما دفعه" المحسوب من المصاريف — لأن أي مصروف
+  // يظهر هذا الشخص كدافع له إنما موّل فعليًا من نفس المبلغ المجمّع، وليس مالًا جديدًا منفصلًا.
+  // نصيبه من كل المصاريف يبقى يُخصم منه بشكل طبيعي.
   function advanceAdjustedRows(rows) {
     return rows.map((r) => {
       const p = getParticipantById(r.id);
       const advanceDueSAR = (p && p.advanceDueSAR) || 0;
-      return { ...r, advanceDueSAR, paidSAR: r.paidSAR + advanceDueSAR, netSAR: r.netSAR + advanceDueSAR };
+      const paidSAR = advanceDueSAR > 0 ? advanceDueSAR : r.paidSAR;
+      return { ...r, advanceDueSAR, paidSAR, netSAR: paidSAR - r.shareSAR };
     });
   }
 
@@ -1842,7 +1845,7 @@
       options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { color: '#eef1f2' } }, x: { grid: { display: false } } } }
     });
 
-    // ملخص التسوية الحالية (للنشطين فقط، مع احتساب أي سلفة/مبلغ مقدّم كأنه مدفوع)
+    // ملخص التسوية الحالية (للنشطين فقط، مع اعتماد أي مبلغ مدفوع مسبقًا كإجمالي ما دفعه)
     const settlementLinesActive = settlementViaTreasurer(advanceAdjustedRows(activeRows), currentTripData.treasurerId);
     document.getElementById('dashboard-settlement').innerHTML = settlementLinesActive.length
       ? settlementLinesActive.map(settlementLineHTML).join('')
@@ -1937,9 +1940,8 @@
           ${data.isClosed ? `<span class="status-badge closed" style="margin-inline-start:8px">مقفل — ${escapeHTML(p.closedStage || '')}</span>` : ''}
         </div>
         <table style="width:100%;border-collapse:collapse;margin-bottom:16px" border="1" cellpadding="6">
-          <tr><td>إجمالي ما دفعه</td><td>${roundSAR(data.paidSAR).toFixed(2)} ريال</td></tr>
+          <tr><td>إجمالي ما دفعه${data.advanceDueSAR ? ' (مبلغ مدفوع مسبقًا)' : ''}</td><td>${roundSAR(data.paidSAR).toFixed(2)} ريال</td></tr>
           <tr><td>إجمالي نصيبه</td><td>${roundSAR(data.shareSAR).toFixed(2)} ريال</td></tr>
-          ${data.advanceDueSAR ? `<tr><td>سلفة / مبلغ مقدّم (ضمن ما دفعه)</td><td>${data.advanceDueSAR.toFixed(2)} ريال</td></tr>` : ''}
           <tr><td>الصافي</td><td>${netAbs.toFixed(2)} ريال (${netLabel})</td></tr>
         </table>
         <h3>حسب التصنيف</h3>
@@ -1995,9 +1997,8 @@
           rtlPara(`${currentTripData.name} — ${currentTripData.year || ''}${data.isClosed ? ' (مقفل — ' + (p.closedStage || '') + ')' : ''}`),
           rtlPara(' '),
           simpleTable(['البند', 'القيمة'], [
-            ['إجمالي ما دفعه', roundSAR(data.paidSAR).toFixed(2) + ' ريال'],
+            [data.advanceDueSAR ? 'إجمالي ما دفعه (مبلغ مدفوع مسبقًا)' : 'إجمالي ما دفعه', roundSAR(data.paidSAR).toFixed(2) + ' ريال'],
             ['إجمالي نصيبه', roundSAR(data.shareSAR).toFixed(2) + ' ريال'],
-            ...(data.advanceDueSAR ? [['سلفة / مبلغ مقدّم (ضمن ما دفعه)', `${data.advanceDueSAR.toFixed(2)} ريال`]] : []),
             ['الصافي', `${netAbs.toFixed(2)} ريال (${netLabel})`]
           ]),
           rtlPara(' '),
@@ -2108,10 +2109,14 @@
       body: `بعد إنشاء الرحلة، ادخل عليها من القائمة لفتح شاشاتها. من "إدارة المشاركين" أضف
       الأشخاص، ثم حدّد "المحصّل" (أمين الصندوق) — وهو الشخص الذي يستلم من المدينين ويوزّع
       على الدائنين عند التسوية. لازم تحدّد محصّلًا قبل ما تقدر تقفل أي ميزانية.
-      إذا كان أحد المشاركين قد سلّم سلفة/مبلغًا مقدّمًا للمحصّل عند انضمامه، أدخل مبلغها عند
-      الإضافة اليدوية أو لاحقًا بزر "+ سلفة" في جدول المشاركين — تُحتسب فورًا كأنها ضمن ما
-      دفعه من لحظة التسجيل، وتُخصم منها حصته من المصاريف تلقائيًا، فيصير رصيده له أو عليه
-      حسب الفرق.`
+      إذا كان أحد المشاركين قد سلّم مبلغًا مقدّمًا (سلفة) للمحصّل عند انضمامه — وهذا هو الوضع
+      المعتاد: قبل الرحلة يجمع كل شخص مبلغًا تقريبيًا حسب استطاعته في صندوق الرحلة — أدخل
+      هذا المبلغ عند الإضافة اليدوية أو لاحقًا بزر "+ سلفة" في جدول المشاركين. هذا المبلغ
+      يصبح "إجمالي ما دفعه" بشكل كامل (بدل احتسابه من كونه دافعًا لمصروف معيّن، لأن أي
+      مصروف يُدفع منه أصلًا يكون قد موّل من نفس هذا الصندوق)، ويُخصم منه نصيبه من كل
+      مصروف يشارك فيه تلقائيًا، فيصير رصيده له أو عليه حسب الفرق. أما المصاريف التي تتجاوز
+      ما في الصندوق فتُسجَّل بالطريقة العادية (يُحدَّد من دفعها فعليًا — مثلًا المحصّل من ماله
+      الخاص مؤقتًا) وتتكفّل حصص المشاركين بتغطيتها عند التسوية كأي مصروف عادي.`
     },
     {
       title: '٤) تسجيل المصاريف',
