@@ -1495,7 +1495,7 @@
   function computeBalances(expensesList) {
     const balances = {};
     (currentTripData.participants || []).forEach((p) => {
-      balances[p.id] = { paid: 0, share: 0 };
+      balances[p.id] = { paid: 0, share: 0, surplus: 0 };
     });
 
     expensesList.forEach((exp) => {
@@ -1507,19 +1507,23 @@
         if (ids.length) {
           const perPerson = amountSAR / ids.length;
           ids.forEach((pid) => {
-            if (!balances[pid]) balances[pid] = { paid: 0, share: 0 };
+            if (!balances[pid]) balances[pid] = { paid: 0, share: 0, surplus: 0 };
             balances[pid].paid += perPerson;
           });
         }
       } else {
-        if (!balances[exp.payerId]) balances[exp.payerId] = { paid: 0, share: 0 };
+        if (!balances[exp.payerId]) balances[exp.payerId] = { paid: 0, share: 0, surplus: 0 };
         balances[exp.payerId].paid += amountSAR;
+        // الفائض = ما دفعه لغيره فقط (المبلغ ناقص نصيبه هو من نفس هذا المصروف إن كان
+        // من ضمن المشاركين فيه) — يُستخدم مع من عنده مبلغ مدفوع مسبقًا (انظر advanceAdjustedRows)
+        const ownShareOfThisExpense = ids.length && ids.includes(exp.payerId) ? amountSAR / ids.length : 0;
+        balances[exp.payerId].surplus += (amountSAR - ownShareOfThisExpense);
       }
 
       if (!ids.length) return;
       const share = amountSAR / ids.length;
       ids.forEach((pid) => {
-        if (!balances[pid]) balances[pid] = { paid: 0, share: 0 };
+        if (!balances[pid]) balances[pid] = { paid: 0, share: 0, surplus: 0 };
         balances[pid].share += share;
       });
     });
@@ -1527,7 +1531,7 @@
     return balances;
   }
 
-  // balancesSummary(expensesList) -> { rows:[{id,name,paidSAR,shareSAR,netSAR}], totalCheck }
+  // balancesSummary(expensesList) -> { rows:[{id,name,paidSAR,shareSAR,surplusSAR,netSAR}], totalCheck }
   function balancesSummary(expensesList) {
     const balances = computeBalances(expensesList);
     const rows = Object.entries(balances).map(([id, b]) => ({
@@ -1535,20 +1539,21 @@
       name: participantName(id),
       paidSAR: b.paid,
       shareSAR: b.share,
+      surplusSAR: b.surplus,
       netSAR: b.paid - b.share
     }));
     const totalCheck = rows.reduce((s, r) => s + r.netSAR, 0);
     return { rows, totalCheck };
   }
 
-  // المبلغ المدفوع مسبقًا (قبل الرحلة) يحل محل "ما دفعه" المحسوب من المصاريف — لأن أي مصروف
-  // يظهر هذا الشخص كدافع له إنما موّل فعليًا من نفس المبلغ المجمّع، وليس مالًا جديدًا منفصلًا.
-  // نصيبه من كل المصاريف يبقى يُخصم منه بشكل طبيعي.
+  // المبلغ المدفوع مسبقًا (قبل الرحلة) يحل محل "ما دفعه" المحسوب من نصيبه هو فقط من
+  // المصاريف (لأن ذلك جزء من نفس المبلغ المجمّع)، لكن أي مبلغ دفعه فعليًا لتغطية نصيب
+  // غيره (فائض) يُضاف فوق المبلغ المدفوع مسبقًا لأنه مال حقيقي إضافي يستحق أن يُحتسب له.
   function advanceAdjustedRows(rows) {
     return rows.map((r) => {
       const p = getParticipantById(r.id);
       const advanceDueSAR = (p && p.advanceDueSAR) || 0;
-      const paidSAR = advanceDueSAR > 0 ? advanceDueSAR : r.paidSAR;
+      const paidSAR = advanceDueSAR > 0 ? advanceDueSAR + (r.surplusSAR || 0) : r.paidSAR;
       return { ...r, advanceDueSAR, paidSAR, netSAR: paidSAR - r.shareSAR };
     });
   }
@@ -1904,8 +1909,18 @@
       currencyTotals[e.currency].sar += myShareSAR;
     });
 
+    // ما دفعه هذا الشخص فعليًا (كدافع فردي وليس "محصّل من الكل") مقسّمًا حسب التصنيف —
+    // يُعرض في التقرير أسفل إجمالي ما دفعه، ليتضح مثلاً أنه هو من دفع مبلغ السكن.
+    const paidByCategory = {};
+    currentExpenses.forEach((e) => {
+      if (e.payerId !== participant.id) return;
+      const amountSAR = convertToSAR(e.amount, e.currency);
+      paidByCategory[e.category] = (paidByCategory[e.category] || 0) + amountSAR;
+    });
+
     return {
       participant, isClosed, paidSAR, shareSAR, netSAR, settlementLine, relevantExpenses, categoryTotals, currencyTotals,
+      paidByCategory,
       advanceDueSAR: participant.advanceDueSAR || 0
     };
   }
@@ -1942,6 +1957,7 @@
         </div>
         <table style="width:100%;border-collapse:collapse;margin-bottom:16px" border="1" cellpadding="6">
           <tr><td>إجمالي ما دفعه${data.advanceDueSAR ? ' (مبلغ مدفوع مسبقًا)' : ''}</td><td>${roundSAR(data.paidSAR).toFixed(2)} ريال</td></tr>
+          ${Object.entries(data.paidByCategory).map(([cat, v]) => `<tr><td>منها: دفع ${escapeHTML(cat)}</td><td>${roundSAR(v).toFixed(2)} ريال</td></tr>`).join('')}
           <tr><td>إجمالي نصيبه</td><td>${roundSAR(data.shareSAR).toFixed(2)} ريال</td></tr>
           <tr><td>الصافي</td><td>${netAbs.toFixed(2)} ريال (${netLabel})</td></tr>
         </table>
@@ -1999,6 +2015,7 @@
           rtlPara(' '),
           simpleTable(['البند', 'القيمة'], [
             [data.advanceDueSAR ? 'إجمالي ما دفعه (مبلغ مدفوع مسبقًا)' : 'إجمالي ما دفعه', roundSAR(data.paidSAR).toFixed(2) + ' ريال'],
+            ...Object.entries(data.paidByCategory).map(([cat, v]) => [`منها: دفع ${cat}`, roundSAR(v).toFixed(2) + ' ريال']),
             ['إجمالي نصيبه', roundSAR(data.shareSAR).toFixed(2) + ' ريال'],
             ['الصافي', `${netAbs.toFixed(2)} ريال (${netLabel})`]
           ]),
@@ -2148,11 +2165,12 @@
       إذا كان أحد المشاركين قد سلّم مبلغًا مقدّمًا (سلفة) للمحصّل عند انضمامه — وهذا هو الوضع
       المعتاد: قبل الرحلة يجمع كل شخص مبلغًا تقريبيًا حسب استطاعته في صندوق الرحلة — أدخل
       هذا المبلغ عند الإضافة اليدوية أو لاحقًا بزر "+ سلفة" في جدول المشاركين. هذا المبلغ
-      يصبح "إجمالي ما دفعه" بشكل كامل (بدل احتسابه من كونه دافعًا لمصروف معيّن، لأن أي
-      مصروف يُدفع منه أصلًا يكون قد موّل من نفس هذا الصندوق)، ويُخصم منه نصيبه من كل
-      مصروف يشارك فيه تلقائيًا، فيصير رصيده له أو عليه حسب الفرق. أما المصاريف التي تتجاوز
-      ما في الصندوق فتُسجَّل بالطريقة العادية (يُحدَّد من دفعها فعليًا — مثلًا المحصّل من ماله
-      الخاص مؤقتًا) وتتكفّل حصص المشاركين بتغطيتها عند التسوية كأي مصروف عادي.`
+      يصبح أساس "إجمالي ما دفعه" (بدل احتسابه من نصيبه هو فقط من المصاريف، لأن ذلك مالٌ من
+      نفس الصندوق)، ويُخصم منه نصيبه من كل مصروف يشارك فيه تلقائيًا، فيصير رصيده له أو عليه
+      حسب الفرق. لكن لو كان هذا الشخص نفسه هو من **دفع فعليًا** مصروفًا يشمل غيره (مثل دفع
+      قيمة السكن لكل المجموعة)، فالمبلغ الزائد عن نصيبه هو (الفائض الذي غطّاه لغيره) يُضاف
+      فوق سلفته تلقائيًا ويظهر في تقريره كسطر منفصل ("منها: دفع [التصنيف]") أسفل إجمالي ما
+      دفعه — لأن هذا مال حقيقي إضافي يستحق أن يُحتسب له عند التسوية.`
     },
     {
       title: '٤) تسجيل المصاريف',
