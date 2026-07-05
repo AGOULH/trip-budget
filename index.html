@@ -2059,48 +2059,16 @@
     }).save();
   });
 
-  function waDigitsOnly(raw) {
-    return (raw || '').replace(/[^\d]/g, '');
-  }
-
-  function whatsappReportText(p, data) {
-    const netLabel = data.netSAR >= 0 ? 'له' : 'عليه';
-    const netAbs = Math.abs(roundSAR(data.netSAR));
-    return [
-      `تقرير: ${p.name}`,
-      `${currentTripData.name} — ${currentTripData.year || ''}`,
-      `إجمالي ما دفعه: ${roundSAR(data.paidSAR).toFixed(2)} ريال`,
-      `إجمالي نصيبه: ${roundSAR(data.shareSAR).toFixed(2)} ريال`,
-      `الصافي: ${netAbs.toFixed(2)} ريال (${netLabel})`,
-      settlementLineText(data)
-    ].join('\n');
-  }
-
+  // نفس أسلوب مشاركة التقارير المستخدم في تطبيق كأس العالم: نحاول أولًا واجهة
+  // المشاركة الأصلية للجهاز (navigator.share) بملف PDF مباشرة — يختار المستخدم
+  // واتساب منها بنفسه. إذا لم يدعمها الجهاز، ننزّل الملف فقط ونطلب مشاركته يدويًا،
+  // بدون أي محاولة لفتح رابط واتساب أو طلب رقم جوال.
   document.getElementById('btn-share-whatsapp').addEventListener('click', async () => {
     const p = getParticipantById(reportPersonSelect.value);
     if (!p) return;
-    const data = buildPersonReportData(p);
-    const text = whatsappReportText(p, data);
-
-    const input = prompt('رقم واتساب مع رمز الدولة (مثال: 9665XXXXXXXX) — اتركه فارغًا لاختيار جهة الإرسال من واتساب:', waDigitsOnly(p.phone));
-    if (input === null) return;
-    const phone = waDigitsOnly(input);
-    const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
-
-    // ننقر رابطًا حقيقيًا (بدل window.open) لأن بعض المتصفحات تحظر window.open
-    // حتى لو استُدعي مباشرة بعد prompt — النقر الفعلي على <a> لا يُحظر بنفس الطريقة.
-    const a = document.createElement('a');
-    a.href = waUrl;
-    a.target = '_blank';
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    showToast('فُتح واتساب بنص التقرير — نزّل PDF/Word من الأزرار أعلاه وأرفقه يدويًا إذا احتجت');
-
-    // على متصفحات الجوال التي تدعم مشاركة الملفات: نعرض بعدها اختياريًا نافذة مشاركة
-    // أصلية لإرفاق ملف PDF مباشرة (لا تمنع فتح واتساب أعلاه في كل الحالات).
+    showToast('جارٍ تجهيز التقرير…');
     try {
+      const data = buildPersonReportData(p);
       reportPreview.innerHTML = personReportHTML(data);
       reportPreview.style.display = 'block';
       const pdfBlob = await html2pdf().from(reportPreview).set({
@@ -2111,11 +2079,18 @@
       }).outputPdf('blob');
       const file = new File([pdfBlob], `تقرير-${p.name}.pdf`, { type: 'application/pdf' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        await navigator.share({ files: [file], title: `تقرير ${p.name}`, text });
+        try {
+          await navigator.share({ files: [file], title: `تقرير ${p.name}` });
+          return;
+        } catch (err) {
+          if (err && err.name === 'AbortError') return;
+        }
       }
+      downloadBlob(pdfBlob, `تقرير-${p.name}.pdf`);
+      showToast('جهازك لا يدعم المشاركة المباشرة — تم تنزيل ملف PDF، شاركه عبر واتساب يدويًا');
     } catch (err) {
-      if (err && err.name === 'AbortError') return;
-      console.warn('تعذّرت مشاركة ملف PDF مباشرة:', err);
+      console.error('تعذّر تجهيز التقرير للمشاركة:', err);
+      showToast('تعذّر تجهيز التقرير للمشاركة', true);
     }
   });
 
@@ -2210,10 +2185,10 @@
       title: '٨) التقارير',
       body: `من "التقارير" اختر شخصًا وصدّر تقريره Word أو PDF (يشمل ما دفعه ونصيبه والصافي
       وتفصيل مصاريفه وسطر التسوية)، أو اضغط "تصدير الكل" لتحميل ملف ZIP فيه تقارير كل
-      المشاركين بالصيغتين دفعة واحدة. زر "إرسال عبر واتساب" يفتح واتساب مباشرة برقم
-      الشخص (لو مسجّل جواله) ونص التقرير جاهزًا؛ على الجوال يحاول أيضًا إرفاق ملف PDF
-      تلقائيًا عبر نافذة المشاركة، وإن لم يدعمها الجهاز تقدر تنزّل الملف وترفقه يدويًا
-      في المحادثة.`
+      المشاركين بالصيغتين دفعة واحدة. زر "إرسال عبر واتساب" يجهّز ملف PDF ويفتح نافذة
+      المشاركة الأصلية للجهاز (على الجوال عادة) لتختار واتساب منها مباشرة بالملف
+      المرفق؛ وإن لم يدعم جهازك هذه الميزة (غالبًا على الحاسوب) يُنزَّل ملف PDF مباشرة
+      وتشاركه بنفسك في محادثة واتساب.`
     }
   ];
 
