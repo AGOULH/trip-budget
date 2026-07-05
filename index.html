@@ -1932,6 +1932,17 @@
     };
   }
 
+  // صفوف "ما دفعه" التفصيلية: المدفوع مسبقًا (ثابت كما أُدخل) + سطر لكل دفعة فعلية
+  // لتغطية غيره، وأخيرًا سطر المجموع. إن لم يكن هناك أي تفصيل يُعاد سطر واحد فقط.
+  function paidBreakdownRows(data) {
+    const rows = [];
+    if (data.advanceDueSAR) rows.push(['مدفوع مسبقًا', data.advanceDueSAR]);
+    Object.entries(data.paidByCategory).forEach(([cat, v]) => rows.push([`دفع ${cat}`, v]));
+    const totalLabel = rows.length ? 'مجموع الدفع' : 'إجمالي ما دفعه';
+    rows.push([totalLabel, data.paidSAR]);
+    return rows;
+  }
+
   function settlementLineText(data) {
     if (!data.settlementLine) return 'لا توجد تحويلات مطلوبة';
     const p = data.participant;
@@ -1963,8 +1974,7 @@
           ${data.isClosed ? `<span class="status-badge closed" style="margin-inline-start:8px">مقفل — ${escapeHTML(p.closedStage || '')}</span>` : ''}
         </div>
         <table style="width:100%;border-collapse:collapse;margin-bottom:16px" border="1" cellpadding="6">
-          <tr><td>إجمالي ما دفعه${data.advanceDueSAR ? ' (مبلغ مدفوع مسبقًا)' : ''}</td><td>${roundSAR(data.paidSAR).toFixed(2)} ريال</td></tr>
-          ${Object.entries(data.paidByCategory).map(([cat, v]) => `<tr><td>منها: دفع ${escapeHTML(cat)}</td><td>${roundSAR(v).toFixed(2)} ريال</td></tr>`).join('')}
+          ${paidBreakdownRows(data).map(([label, v]) => `<tr><td>${escapeHTML(label)}</td><td>${roundSAR(v).toFixed(2)} ريال</td></tr>`).join('')}
           <tr><td>إجمالي نصيبه</td><td>${roundSAR(data.shareSAR).toFixed(2)} ريال</td></tr>
           <tr><td>الصافي</td><td>${netAbs.toFixed(2)} ريال (${netLabel})</td></tr>
         </table>
@@ -2021,8 +2031,7 @@
           rtlPara(`${currentTripData.name} — ${currentTripData.year || ''}${data.isClosed ? ' (مقفل — ' + (p.closedStage || '') + ')' : ''}`),
           rtlPara(' '),
           simpleTable(['البند', 'القيمة'], [
-            [data.advanceDueSAR ? 'إجمالي ما دفعه (مبلغ مدفوع مسبقًا)' : 'إجمالي ما دفعه', roundSAR(data.paidSAR).toFixed(2) + ' ريال'],
-            ...Object.entries(data.paidByCategory).map(([cat, v]) => [`منها: دفع ${cat}`, roundSAR(v).toFixed(2) + ' ريال']),
+            ...paidBreakdownRows(data).map(([label, v]) => [label, roundSAR(v).toFixed(2) + ' ريال']),
             ['إجمالي نصيبه', roundSAR(data.shareSAR).toFixed(2) + ' ريال'],
             ['الصافي', `${netAbs.toFixed(2)} ريال (${netLabel})`]
           ]),
@@ -2172,13 +2181,13 @@
       إذا كان أحد المشاركين قد سلّم مبلغًا مقدّمًا (سلفة) للمحصّل عند انضمامه — وهذا هو الوضع
       المعتاد: قبل الرحلة يجمع كل شخص مبلغًا تقريبيًا حسب استطاعته في صندوق الرحلة — أدخل
       هذا المبلغ عند الإضافة اليدوية أو لاحقًا بزر "+ سلفة" في جدول المشاركين. هذا المبلغ
-      يصبح أساس "إجمالي ما دفعه" (بدل احتسابه من نصيبه هو فقط من المصاريف، لأن ذلك مالٌ من
-      نفس الصندوق)، ويُخصم منه نصيبه من كل مصروف يشارك فيه تلقائيًا، فيصير رصيده له أو عليه
-      حسب الفرق. لكن لو كان هذا الشخص نفسه هو من **دفع فعليًا** مصروفًا يشمل غيره (مثل دفع
-      قيمة السكن لكل المجموعة)، يُضاف كامل ذلك المبلغ فوق سلفته تلقائيًا (لأنه مال حقيقي
-      إضافي دفعه من جيبه لتغطية المجموعة) ويظهر في تقريره كسطر منفصل ("منها: دفع
-      [التصنيف]") أسفل إجمالي ما دفعه. أما لو دفع مصروفًا لنفسه فقط فلا يُضاف شيء، لأن ذلك
-      يُفترض أنه مموَّل من نفس سلفته.`
+      يظهر في تقريره كسطر ثابت "مدفوع مسبقًا" لا يتغيّر، ويُخصم من مجموعه نصيبه من كل
+      مصروف يشارك فيه تلقائيًا، فيصير رصيده له أو عليه حسب الفرق. لكن لو كان هذا الشخص
+      نفسه هو من **دفع فعليًا** مصروفًا يشمل غيره (مثل دفع قيمة السكن لكل المجموعة)، يُضاف
+      كامل ذلك المبلغ في سطر جديد منفصل ("دفع [التصنيف]") فوق سلفته الثابتة — لأنه مال
+      حقيقي إضافي دفعه من جيبه لتغطية المجموعة — وآخر سطر "مجموع الدفع" يجمع كل هذه
+      المبالغ. أما لو دفع مصروفًا لنفسه فقط فلا يُضاف شيء، لأن ذلك يُفترض أنه مموَّل من
+      نفس سلفته.`
     },
     {
       title: '٤) تسجيل المصاريف',
