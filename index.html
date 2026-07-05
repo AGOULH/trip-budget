@@ -2087,13 +2087,15 @@
     const phone = waDigitsOnly(input);
     const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
 
-    // نفتح تبويب واتساب فورًا (ضمن حدث النقر مباشرة) حتى لا يحظره متصفح الحاسوب
-    // كنافذة منبثقة بسبب أي تأخير لاحق (مثل توليد PDF).
-    const waTab = window.open(waUrl, '_blank');
-    if (!waTab) {
-      showToast('المتصفح حظر فتح واتساب — اسمح بالنوافذ المنبثقة لهذا الموقع وحاول مجددًا', true);
-      return;
-    }
+    // ننقر رابطًا حقيقيًا (بدل window.open) لأن بعض المتصفحات تحظر window.open
+    // حتى لو استُدعي مباشرة بعد prompt — النقر الفعلي على <a> لا يُحظر بنفس الطريقة.
+    const a = document.createElement('a');
+    a.href = waUrl;
+    a.target = '_blank';
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
     showToast('فُتح واتساب بنص التقرير — نزّل PDF/Word من الأزرار أعلاه وأرفقه يدويًا إذا احتجت');
 
     // على متصفحات الجوال التي تدعم مشاركة الملفات: نعرض بعدها اختياريًا نافذة مشاركة
