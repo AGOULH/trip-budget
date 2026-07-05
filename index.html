@@ -2082,8 +2082,22 @@
     const data = buildPersonReportData(p);
     const text = whatsappReportText(p, data);
 
-    // على متصفحات الجوال: نحاول مشاركة ملف الـPDF مباشرة مع النص عبر واجهة المشاركة
-    // الأصلية (يختار المستخدم واتساب منها) — تعمل فقط إن كان الجهاز/المتصفح يدعمها.
+    const input = prompt('رقم واتساب مع رمز الدولة (مثال: 9665XXXXXXXX) — اتركه فارغًا لاختيار جهة الإرسال من واتساب:', waDigitsOnly(p.phone));
+    if (input === null) return;
+    const phone = waDigitsOnly(input);
+    const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+
+    // نفتح تبويب واتساب فورًا (ضمن حدث النقر مباشرة) حتى لا يحظره متصفح الحاسوب
+    // كنافذة منبثقة بسبب أي تأخير لاحق (مثل توليد PDF).
+    const waTab = window.open(waUrl, '_blank');
+    if (!waTab) {
+      showToast('المتصفح حظر فتح واتساب — اسمح بالنوافذ المنبثقة لهذا الموقع وحاول مجددًا', true);
+      return;
+    }
+    showToast('فُتح واتساب بنص التقرير — نزّل PDF/Word من الأزرار أعلاه وأرفقه يدويًا إذا احتجت');
+
+    // على متصفحات الجوال التي تدعم مشاركة الملفات: نعرض بعدها اختياريًا نافذة مشاركة
+    // أصلية لإرفاق ملف PDF مباشرة (لا تمنع فتح واتساب أعلاه في كل الحالات).
     try {
       reportPreview.innerHTML = personReportHTML(data);
       reportPreview.style.display = 'block';
@@ -2096,20 +2110,11 @@
       const file = new File([pdfBlob], `تقرير-${p.name}.pdf`, { type: 'application/pdf' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         await navigator.share({ files: [file], title: `تقرير ${p.name}`, text });
-        return;
       }
     } catch (err) {
-      if (err && err.name === 'AbortError') return; // المستخدم ألغى نافذة المشاركة
-      console.warn('تعذّرت مشاركة ملف PDF مباشرة، سيُفتح واتساب بالنص فقط:', err);
+      if (err && err.name === 'AbortError') return;
+      console.warn('تعذّرت مشاركة ملف PDF مباشرة:', err);
     }
-
-    // الوضع الافتراضي (أجهزة الحاسوب أو متصفح بدون دعم للمشاركة): نفتح واتساب بالنص جاهزًا
-    const input = prompt('رقم واتساب مع رمز الدولة (مثال: 9665XXXXXXXX) — اتركه فارغًا لاختيار جهة الإرسال من واتساب:', waDigitsOnly(p.phone));
-    if (input === null) return;
-    const phone = waDigitsOnly(input);
-    const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
-    window.open(url, '_blank');
-    showToast('فُتح واتساب بنص التقرير — نزّل PDF/Word من الأزرار أعلاه وأرفقه يدويًا إذا احتجت');
   });
 
   document.getElementById('btn-export-all').addEventListener('click', async () => {
