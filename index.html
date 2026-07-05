@@ -820,6 +820,7 @@
         <button class="btn secondary" id="btn-preview-report">معاينة التقرير</button>
         <button class="btn secondary" id="btn-export-word">تصدير Word</button>
         <button class="btn secondary" id="btn-export-pdf">تصدير PDF</button>
+        <button class="btn secondary" id="btn-share-whatsapp">إرسال عبر واتساب</button>
         <button class="btn" id="btn-export-all">تصدير الكل (ZIP)</button>
       </div>
       <div id="report-preview" class="subcard" style="display:none"></div>
@@ -2058,6 +2059,59 @@
     }).save();
   });
 
+  function waDigitsOnly(raw) {
+    return (raw || '').replace(/[^\d]/g, '');
+  }
+
+  function whatsappReportText(p, data) {
+    const netLabel = data.netSAR >= 0 ? 'له' : 'عليه';
+    const netAbs = Math.abs(roundSAR(data.netSAR));
+    return [
+      `تقرير: ${p.name}`,
+      `${currentTripData.name} — ${currentTripData.year || ''}`,
+      `إجمالي ما دفعه: ${roundSAR(data.paidSAR).toFixed(2)} ريال`,
+      `إجمالي نصيبه: ${roundSAR(data.shareSAR).toFixed(2)} ريال`,
+      `الصافي: ${netAbs.toFixed(2)} ريال (${netLabel})`,
+      settlementLineText(data)
+    ].join('\n');
+  }
+
+  document.getElementById('btn-share-whatsapp').addEventListener('click', async () => {
+    const p = getParticipantById(reportPersonSelect.value);
+    if (!p) return;
+    const data = buildPersonReportData(p);
+    const text = whatsappReportText(p, data);
+
+    // على متصفحات الجوال: نحاول مشاركة ملف الـPDF مباشرة مع النص عبر واجهة المشاركة
+    // الأصلية (يختار المستخدم واتساب منها) — تعمل فقط إن كان الجهاز/المتصفح يدعمها.
+    try {
+      reportPreview.innerHTML = personReportHTML(data);
+      reportPreview.style.display = 'block';
+      const pdfBlob = await html2pdf().from(reportPreview).set({
+        margin: 10,
+        filename: `تقرير-${p.name}.pdf`,
+        html2canvas: { scale: 2 },
+        jsPDF: { unit: 'mm', format: 'a4' }
+      }).outputPdf('blob');
+      const file = new File([pdfBlob], `تقرير-${p.name}.pdf`, { type: 'application/pdf' });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        await navigator.share({ files: [file], title: `تقرير ${p.name}`, text });
+        return;
+      }
+    } catch (err) {
+      if (err && err.name === 'AbortError') return; // المستخدم ألغى نافذة المشاركة
+      console.warn('تعذّرت مشاركة ملف PDF مباشرة، سيُفتح واتساب بالنص فقط:', err);
+    }
+
+    // الوضع الافتراضي (أجهزة الحاسوب أو متصفح بدون دعم للمشاركة): نفتح واتساب بالنص جاهزًا
+    const input = prompt('رقم واتساب مع رمز الدولة (مثال: 9665XXXXXXXX) — اتركه فارغًا لاختيار جهة الإرسال من واتساب:', waDigitsOnly(p.phone));
+    if (input === null) return;
+    const phone = waDigitsOnly(input);
+    const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+    window.open(url, '_blank');
+    showToast('فُتح واتساب بنص التقرير — نزّل PDF/Word من الأزرار أعلاه وأرفقه يدويًا إذا احتجت');
+  });
+
   document.getElementById('btn-export-all').addEventListener('click', async () => {
     if (!currentTripData) return;
     const participants = currentTripData.participants || [];
@@ -2149,7 +2203,10 @@
       title: '٨) التقارير',
       body: `من "التقارير" اختر شخصًا وصدّر تقريره Word أو PDF (يشمل ما دفعه ونصيبه والصافي
       وتفصيل مصاريفه وسطر التسوية)، أو اضغط "تصدير الكل" لتحميل ملف ZIP فيه تقارير كل
-      المشاركين بالصيغتين دفعة واحدة.`
+      المشاركين بالصيغتين دفعة واحدة. زر "إرسال عبر واتساب" يفتح واتساب مباشرة برقم
+      الشخص (لو مسجّل جواله) ونص التقرير جاهزًا؛ على الجوال يحاول أيضًا إرفاق ملف PDF
+      تلقائيًا عبر نافذة المشاركة، وإن لم يدعمها الجهاز تقدر تنزّل الملف وترفقه يدويًا
+      في المحادثة.`
     }
   ];
 
