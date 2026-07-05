@@ -11,6 +11,7 @@
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root {
     --bg: #f4f6f8;
@@ -1972,7 +1973,7 @@
 
     return `
       <div style="position:relative;font-family:Cairo,sans-serif;direction:rtl;text-align:right;padding:16px;max-width:760px;margin:0 auto;background:#fff;color:#1e2a2f">
-        <img src="${REPORT_STICKER_DATA_URI}" alt="" style="position:absolute;bottom:10px;right:10px;width:110px;opacity:0.15;pointer-events:none;user-select:none">
+        <img src="${REPORT_STICKER_DATA_URI}" alt="" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:320px;max-width:70%;opacity:0.1;pointer-events:none;user-select:none">
         <h2 style="margin-bottom:4px">تقرير: ${escapeHTML(p.name)}</h2>
         <div style="color:#666;font-size:13px;margin-bottom:16px">
           ${escapeHTML(currentTripData.name)} — ${currentTripData.year || ''}
@@ -2070,21 +2071,22 @@
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
-  // إعدادات html2pdf لصفحة PDF واحدة دائمًا: بدل صيغة A4 الثابتة (التي تقسّم المحتوى
-  // الطويل على عدّة صفحات)، نحسب أبعاد الصفحة من ارتفاع/عرض المحتوى نفسه فتصير الصفحة
-  // بحجم التقرير بالضبط ولا يحدث أي تقسيم.
-  function singlePagePdfOptions(el, filename) {
-    const marginMM = 10;
-    const pxToMm = 25.4 / 96;
-    const widthMM = (el.scrollWidth * pxToMm) + marginMM * 2;
-    const heightMM = (el.scrollHeight * pxToMm) + marginMM * 2;
-    return {
-      margin: marginMM,
-      filename,
-      html2canvas: { scale: 2 },
-      jsPDF: { unit: 'mm', format: [widthMM, heightMM] },
-      pagebreak: { mode: 'avoid-all' }
-    };
+  // نبني PDF التقرير يدويًا: نحوّل العنصر لصورة (canvas) واحدة عبر محرّك html2pdf
+  // الداخلي، ثم نضعها كصورة واحدة على صفحة PDF بنفس أبعادها بالضبط (بكسل=بكسل) عبر
+  // jsPDF مباشرة. هذا يتجنّب تمامًا منطق تقسيم html2pdf التلقائي للصفحات (الذي كان
+  // يُنتج أحيانًا صفحات إضافية فارغة) — نفس أسلوب تطبيق كأس العالم المرجعي.
+  async function renderReportPdfBlob(el) {
+    const canvas = await html2pdf().set({ html2canvas: { scale: 2, useCORS: true } }).from(el).toCanvas().get('canvas');
+    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({
+      orientation: canvas.height > canvas.width ? 'portrait' : 'landscape',
+      unit: 'px',
+      format: [canvas.width, canvas.height],
+      compress: true
+    });
+    pdf.addImage(imgData, 'JPEG', 0, 0, canvas.width, canvas.height);
+    return pdf.output('blob');
   }
 
   document.getElementById('btn-preview-report').addEventListener('click', () => {
@@ -2106,7 +2108,8 @@
     if (!p) return;
     reportPreview.innerHTML = personReportHTML(buildPersonReportData(p));
     reportPreview.style.display = 'block';
-    await html2pdf().from(reportPreview).set(singlePagePdfOptions(reportPreview, `تقرير-${p.name}.pdf`)).save();
+    const blob = await renderReportPdfBlob(reportPreview);
+    downloadBlob(blob, `تقرير-${p.name}.pdf`);
   });
 
   // نفس أسلوب مشاركة التقارير المستخدم في تطبيق كأس العالم: نحاول أولًا واجهة
@@ -2121,7 +2124,7 @@
       const data = buildPersonReportData(p);
       reportPreview.innerHTML = personReportHTML(data);
       reportPreview.style.display = 'block';
-      const pdfBlob = await html2pdf().from(reportPreview).set(singlePagePdfOptions(reportPreview, `تقرير-${p.name}.pdf`)).outputPdf('blob');
+      const pdfBlob = await renderReportPdfBlob(reportPreview);
       const file = new File([pdfBlob], `تقرير-${p.name}.pdf`, { type: 'application/pdf' });
       if (navigator.canShare && navigator.canShare({ files: [file] })) {
         try {
@@ -2155,7 +2158,7 @@
 
       reportPreview.innerHTML = personReportHTML(data);
       reportPreview.style.display = 'block';
-      const pdfBlob = await html2pdf().from(reportPreview).set(singlePagePdfOptions(reportPreview, `${p.name}.pdf`)).outputPdf('blob');
+      const pdfBlob = await renderReportPdfBlob(reportPreview);
       zip.file(`${p.name}.pdf`, pdfBlob);
     }
     const zipBlob = await zip.generateAsync({ type: 'blob' });
