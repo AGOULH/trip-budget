@@ -617,19 +617,38 @@
         <div class="field full">
           <label>العملات المستخدمة</label>
           <div class="checkbox-row"><input type="checkbox" checked disabled> ريال سعودي (SAR) — العملة المرجعية (سعر الصرف = 1)</div>
+
+          <div class="checkbox-row"><label style="margin:0;font-weight:600;display:flex;align-items:center;gap:8px"><input type="checkbox" id="cur-usd"> دولار أمريكي (USD)</label></div>
+          <div class="field" id="rate-usd-field" style="display:none">
+            <label for="rate-usd">سعر الدولار مقابل الريال (كم ريال = 1 دولار)</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="number" id="rate-usd" step="0.0001" min="0">
+              <button type="button" class="btn secondary btn-sm" id="btn-fetch-rate-usd">جلب السعر الحالي</button>
+            </div>
+          </div>
+
+          <div class="checkbox-row"><label style="margin:0;font-weight:600;display:flex;align-items:center;gap:8px"><input type="checkbox" id="cur-iqd"> دينار عراقي (IQD)</label></div>
+          <div class="field" id="rate-iqd-field" style="display:none">
+            <label for="rate-iqd">سعر الدينار العراقي مقابل الريال (كم ريال = 1 دينار)</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="number" id="rate-iqd" step="0.000001" min="0">
+              <button type="button" class="btn secondary btn-sm" id="btn-fetch-rate-iqd">جلب السعر الحالي</button>
+            </div>
+          </div>
+
           <div id="extra-currencies-list"></div>
           <div class="add-currency-bar">
             <div class="field">
-              <label for="new-currency-code">رمز العملة</label>
-              <input type="text" id="new-currency-code" placeholder="مثال: USD" maxlength="6">
+              <label for="new-currency-code">رمز عملة أخرى (اختياري)</label>
+              <input type="text" id="new-currency-code" placeholder="مثال: EUR" maxlength="6">
             </div>
             <div class="field">
               <label for="new-currency-name">الاسم (اختياري)</label>
-              <input type="text" id="new-currency-name" placeholder="مثال: دولار أمريكي">
+              <input type="text" id="new-currency-name" placeholder="مثال: يورو">
             </div>
             <div class="field">
               <label for="new-currency-rate">سعر الصرف (كم ريال = 1 وحدة)</label>
-              <input type="number" id="new-currency-rate" step="0.000001" min="0" placeholder="مثال: 3.75">
+              <input type="number" id="new-currency-rate" step="0.000001" min="0" placeholder="مثال: 4.10">
             </div>
             <button type="button" class="btn secondary" id="btn-add-currency">+ إضافة / تحديث عملة</button>
           </div>
@@ -1021,7 +1040,57 @@
   const yearInput = document.getElementById('trip-year');
   yearInput.value = new Date().getFullYear();
 
-  // عملات إضافية (غير الريال) تُضاف بحرّية عند إنشاء الرحلة
+  // ---------- الدولار والدينار العراقي: عملتان جاهزتان مع سعر صرف لحظي ----------
+  const curUsd = document.getElementById('cur-usd');
+  const curIqd = document.getElementById('cur-iqd');
+  const rateUsdField = document.getElementById('rate-usd-field');
+  const rateIqdField = document.getElementById('rate-iqd-field');
+  const rateUsdInput = document.getElementById('rate-usd');
+  const rateIqdInput = document.getElementById('rate-iqd');
+
+  let liveRatesPromise = null;
+  function getLiveRates() {
+    if (!liveRatesPromise) {
+      liveRatesPromise = fetch('https://open.er-api.com/v6/latest/SAR').then((r) => r.json());
+    }
+    return liveRatesPromise;
+  }
+
+  async function autoFillLiveRate(code, input) {
+    const placeholderBefore = input.placeholder;
+    input.placeholder = 'جارٍ جلب السعر الحالي…';
+    try {
+      const data = await getLiveRates();
+      if (data && data.rates && data.rates[code]) {
+        input.value = (1 / data.rates[code]).toFixed(code === 'IQD' ? 6 : 4);
+        input.placeholder = placeholderBefore;
+      } else {
+        input.placeholder = 'تعذّر الجلب — أدخل السعر يدويًا';
+      }
+    } catch (err) {
+      console.error('Live rate fetch error:', err);
+      input.placeholder = 'تعذّر الجلب — أدخل السعر يدويًا';
+    }
+  }
+
+  curUsd.addEventListener('change', () => {
+    rateUsdField.style.display = curUsd.checked ? 'block' : 'none';
+    if (curUsd.checked && !rateUsdInput.value) autoFillLiveRate('USD', rateUsdInput);
+  });
+  curIqd.addEventListener('change', () => {
+    rateIqdField.style.display = curIqd.checked ? 'block' : 'none';
+    if (curIqd.checked && !rateIqdInput.value) autoFillLiveRate('IQD', rateIqdInput);
+  });
+  document.getElementById('btn-fetch-rate-usd').addEventListener('click', () => {
+    liveRatesPromise = null;
+    autoFillLiveRate('USD', rateUsdInput);
+  });
+  document.getElementById('btn-fetch-rate-iqd').addEventListener('click', () => {
+    liveRatesPromise = null;
+    autoFillLiveRate('IQD', rateIqdInput);
+  });
+
+  // عملات إضافية (غير الريال والدولار والدينار) تُضاف بحرّية عند إنشاء الرحلة
   let extraCurrencies = [];
   const extraCurrenciesList = document.getElementById('extra-currencies-list');
   const newCurCode = document.getElementById('new-currency-code');
@@ -1045,8 +1114,8 @@
     const name = newCurName.value.trim();
     const rate = parseFloat(newCurRate.value);
 
-    if (!code || code === 'SAR') {
-      showToast('الرجاء إدخال رمز عملة صحيح مختلف عن SAR', true);
+    if (!code || code === 'SAR' || code === 'USD' || code === 'IQD') {
+      showToast('استخدم خانات الدولار/الدينار أعلاه، وأدخل هنا رمز عملة أخرى', true);
       return;
     }
     if (!rate || rate <= 0) {
@@ -1102,10 +1171,28 @@
       return;
     }
 
-    const currencies = ['SAR', ...extraCurrencies.map((c) => c.code)];
+    if (curUsd.checked && (!parseFloat(rateUsdInput.value) || parseFloat(rateUsdInput.value) <= 0)) {
+      showToast('الرجاء إدخال سعر صرف صحيح للدولار', true);
+      return;
+    }
+    if (curIqd.checked && (!parseFloat(rateIqdInput.value) || parseFloat(rateIqdInput.value) <= 0)) {
+      showToast('الرجاء إدخال سعر صرف صحيح للدينار العراقي', true);
+      return;
+    }
+
+    const currencies = ['SAR'];
     const rates = {};
     const currencyNames = {};
+    if (curUsd.checked) {
+      currencies.push('USD');
+      rates.USD = parseFloat(rateUsdInput.value);
+    }
+    if (curIqd.checked) {
+      currencies.push('IQD');
+      rates.IQD = parseFloat(rateIqdInput.value);
+    }
     extraCurrencies.forEach((c) => {
+      currencies.push(c.code);
       rates[c.code] = c.rate;
       if (c.name) currencyNames[c.code] = c.name;
     });
@@ -1133,6 +1220,9 @@
       showToast('تم إنشاء الرحلة بنجاح');
       tripForm.reset();
       yearInput.value = new Date().getFullYear();
+      rateUsdField.style.display = 'none';
+      rateIqdField.style.display = 'none';
+      liveRatesPromise = null;
       extraCurrencies = [];
       renderExtraCurrencies();
       showScreen('trips-list');
