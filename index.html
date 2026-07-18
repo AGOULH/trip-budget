@@ -1393,8 +1393,9 @@
     const activeCount = participants.filter((p) => p.status === 'active').length;
     const totalPaid = participants.reduce((s, p) => s + (paidById[p.id] || 0), 0);
 
-    const rowsHTML = participants.map((p) => `
+    const rowsHTML = participants.map((p, i) => `
       <tr>
+        <td>${i + 1}</td>
         <td>${escapeHTML(p.name)}</td>
         <td><span class="status-badge ${p.status}">${p.status === 'active' ? 'نشط' : 'مقفل'}</span></td>
         <td>${roundSAR(paidById[p.id] || 0).toFixed(2)} ريال</td>
@@ -1413,7 +1414,7 @@
           — إجمالي المدفوع: ${roundSAR(totalPaid).toFixed(2)} ريال
         </div>
         <table style="width:100%;border-collapse:collapse" border="1" cellpadding="6">
-          <tr><th>الاسم</th><th>الحالة</th><th>الدفع (ريال)</th></tr>
+          <tr><th>#</th><th>الاسم</th><th>الحالة</th><th>الدفع (ريال)</th></tr>
           ${rowsHTML}
         </table>
         </div>
