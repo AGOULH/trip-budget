@@ -222,6 +222,34 @@
 
   .btn.secondary:hover { background: #eafaf5; }
 
+  .btn-sm { padding: 5px 12px; font-size: 12px; }
+
+  .currency-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .currency-row .currency-actions { display: flex; gap: 6px; }
+
+  .add-currency-bar {
+    display: flex;
+    align-items: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border);
+  }
+
+  .add-currency-bar .field { margin: 0; }
+  .add-currency-bar .field label { font-size: 12px; }
+  .add-currency-bar input#new-currency-code { text-transform: uppercase; width: 90px; }
+  .add-currency-bar input#new-currency-name { width: 160px; }
+  .add-currency-bar input#new-currency-rate { width: 160px; }
+
   .trips-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -586,19 +614,25 @@
           <label for="trip-year">السنة</label>
           <input type="number" id="trip-year" required>
         </div>
-        <div class="field">
+        <div class="field full">
           <label>العملات المستخدمة</label>
-          <div class="checkbox-row"><input type="checkbox" checked disabled> ريال سعودي (SAR) — العملة المرجعية</div>
-          <div class="checkbox-row"><label style="margin:0;font-weight:600;display:flex;align-items:center;gap:8px"><input type="checkbox" id="cur-usd"> دولار أمريكي (USD)</label></div>
-          <div class="checkbox-row"><label style="margin:0;font-weight:600;display:flex;align-items:center;gap:8px"><input type="checkbox" id="cur-iqd"> دينار عراقي (IQD)</label></div>
-        </div>
-        <div class="field" id="rate-usd-field" style="display:none">
-          <label for="rate-usd">سعر الدولار مقابل الريال (كم ريال = 1 دولار)</label>
-          <input type="number" id="rate-usd" step="0.0001" min="0">
-        </div>
-        <div class="field" id="rate-iqd-field" style="display:none">
-          <label for="rate-iqd">سعر الدينار العراقي مقابل الريال (كم ريال = 1 دينار)</label>
-          <input type="number" id="rate-iqd" step="0.000001" min="0">
+          <div class="checkbox-row"><input type="checkbox" checked disabled> ريال سعودي (SAR) — العملة المرجعية (سعر الصرف = 1)</div>
+          <div id="extra-currencies-list"></div>
+          <div class="add-currency-bar">
+            <div class="field">
+              <label for="new-currency-code">رمز العملة</label>
+              <input type="text" id="new-currency-code" placeholder="مثال: USD" maxlength="6">
+            </div>
+            <div class="field">
+              <label for="new-currency-name">الاسم (اختياري)</label>
+              <input type="text" id="new-currency-name" placeholder="مثال: دولار أمريكي">
+            </div>
+            <div class="field">
+              <label for="new-currency-rate">سعر الصرف (كم ريال = 1 وحدة)</label>
+              <input type="number" id="new-currency-rate" step="0.000001" min="0" placeholder="مثال: 3.75">
+            </div>
+            <button type="button" class="btn secondary" id="btn-add-currency">+ إضافة / تحديث عملة</button>
+          </div>
         </div>
         <div class="full form-note">
           سيتم تحديد <b>المحصّل</b> لاحقًا من قائمة مشاركي الرحلة بعد إضافتهم (مرحلة إدارة المشاركين).
@@ -987,16 +1021,65 @@
   const yearInput = document.getElementById('trip-year');
   yearInput.value = new Date().getFullYear();
 
-  const curUsd = document.getElementById('cur-usd');
-  const curIqd = document.getElementById('cur-iqd');
-  const rateUsdField = document.getElementById('rate-usd-field');
-  const rateIqdField = document.getElementById('rate-iqd-field');
+  // عملات إضافية (غير الريال) تُضاف بحرّية عند إنشاء الرحلة
+  let extraCurrencies = [];
+  const extraCurrenciesList = document.getElementById('extra-currencies-list');
+  const newCurCode = document.getElementById('new-currency-code');
+  const newCurName = document.getElementById('new-currency-name');
+  const newCurRate = document.getElementById('new-currency-rate');
 
-  curUsd.addEventListener('change', () => {
-    rateUsdField.style.display = curUsd.checked ? 'block' : 'none';
+  function renderExtraCurrencies() {
+    extraCurrenciesList.innerHTML = extraCurrencies.map((cur) => `
+      <div class="checkbox-row currency-row">
+        <span>${escapeHTML(cur.name ? `${cur.name} (${cur.code})` : cur.code)} — ${cur.rate} ريال لكل وحدة</span>
+        <div class="currency-actions">
+          <button type="button" class="btn secondary btn-sm" data-edit-currency="${cur.code}">تعديل</button>
+          <button type="button" class="btn secondary btn-sm" data-remove-currency="${cur.code}">حذف</button>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  document.getElementById('btn-add-currency').addEventListener('click', () => {
+    const code = newCurCode.value.trim().toUpperCase();
+    const name = newCurName.value.trim();
+    const rate = parseFloat(newCurRate.value);
+
+    if (!code || code === 'SAR') {
+      showToast('الرجاء إدخال رمز عملة صحيح مختلف عن SAR', true);
+      return;
+    }
+    if (!rate || rate <= 0) {
+      showToast('الرجاء إدخال سعر صرف صحيح', true);
+      return;
+    }
+
+    const existingIdx = extraCurrencies.findIndex((c) => c.code === code);
+    if (existingIdx >= 0) extraCurrencies[existingIdx] = { code, name, rate };
+    else extraCurrencies.push({ code, name, rate });
+
+    newCurCode.value = '';
+    newCurName.value = '';
+    newCurRate.value = '';
+    renderExtraCurrencies();
   });
-  curIqd.addEventListener('change', () => {
-    rateIqdField.style.display = curIqd.checked ? 'block' : 'none';
+
+  extraCurrenciesList.addEventListener('click', (e) => {
+    const editBtn = e.target.closest('[data-edit-currency]');
+    const removeBtn = e.target.closest('[data-remove-currency]');
+    if (editBtn) {
+      const cur = extraCurrencies.find((c) => c.code === editBtn.dataset.editCurrency);
+      if (cur) {
+        newCurCode.value = cur.code;
+        newCurName.value = cur.name || '';
+        newCurRate.value = cur.rate;
+        extraCurrencies = extraCurrencies.filter((c) => c.code !== cur.code);
+        renderExtraCurrencies();
+      }
+    } else if (removeBtn) {
+      extraCurrencies = extraCurrencies.filter((c) => c.code !== removeBtn.dataset.removeCurrency);
+      renderExtraCurrencies();
+    }
   });
 
   const tripForm = document.getElementById('trip-create-form');
@@ -1019,16 +1102,13 @@
       return;
     }
 
-    const currencies = ['SAR'];
+    const currencies = ['SAR', ...extraCurrencies.map((c) => c.code)];
     const rates = {};
-    if (curUsd.checked) {
-      currencies.push('USD');
-      rates.USD = parseFloat(document.getElementById('rate-usd').value) || 0;
-    }
-    if (curIqd.checked) {
-      currencies.push('IQD');
-      rates.IQD = parseFloat(document.getElementById('rate-iqd').value) || 0;
-    }
+    const currencyNames = {};
+    extraCurrencies.forEach((c) => {
+      rates[c.code] = c.rate;
+      if (c.name) currencyNames[c.code] = c.name;
+    });
 
     const submitBtn = tripForm.querySelector('button[type="submit"]');
     submitBtn.disabled = true;
@@ -1040,6 +1120,7 @@
         baseCurrency: 'SAR',
         currencies,
         rates,
+        currencyNames,
         ratesSource: 'manual',
         ratesUpdatedAt: serverTimestamp(),
         treasurerId: null,
@@ -1052,8 +1133,8 @@
       showToast('تم إنشاء الرحلة بنجاح');
       tripForm.reset();
       yearInput.value = new Date().getFullYear();
-      rateUsdField.style.display = 'none';
-      rateIqdField.style.display = 'none';
+      extraCurrencies = [];
+      renderExtraCurrencies();
       showScreen('trips-list');
     } catch (err) {
       console.error('Trip creation error:', err);
@@ -1067,12 +1148,16 @@
   const tripsGrid = document.getElementById('trips-grid');
   const tripsEmpty = document.getElementById('trips-empty');
   const currencyLabels = { SAR: 'ريال', USD: 'دولار', IQD: 'دينار عراقي' };
+  function curLabel(code, trip) {
+    const names = (trip || currentTripData || {}).currencyNames || {};
+    return names[code] || currencyLabels[code] || code;
+  }
 
   function tripCardHTML(id, trip) {
     const participants = trip.participants || [];
     const activeCount = participants.filter((p) => p.status === 'active').length;
     const currencyChips = (trip.currencies || ['SAR'])
-      .map((c) => `<span class="chip">${currencyLabels[c] || c}</span>`)
+      .map((c) => `<span class="chip">${curLabel(c, trip)}</span>`)
       .join('');
 
     return `
@@ -1819,7 +1904,7 @@
     charts.currency = new Chart(document.getElementById('chart-currency'), {
       type: 'bar',
       data: {
-        labels: curEntries.map(([k]) => currencyLabels[k] || k),
+        labels: curEntries.map(([k]) => curLabel(k)),
         datasets: [{ label: 'المكافئ بالريال', data: curEntries.map(([, v]) => roundSAR(v)), backgroundColor: CHART_GREEN, borderRadius: 4, maxBarThickness: 40 }]
       },
       options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, grid: { color: '#eef1f2' } }, x: { grid: { display: false } } } }
@@ -1964,11 +2049,11 @@
     const categoryRows = Object.entries(data.categoryTotals)
       .map(([cat, v]) => `<tr><td>${escapeHTML(cat)}</td><td>${roundSAR(v).toFixed(2)}</td></tr>`).join('');
     const currencyRows = Object.entries(data.currencyTotals)
-      .map(([cur, v]) => `<tr><td>${currencyLabels[cur] || cur}</td><td>${v.original.toFixed(2)}</td><td>${roundSAR(v.sar).toFixed(2)}</td></tr>`).join('');
+      .map(([cur, v]) => `<tr><td>${curLabel(cur)}</td><td>${v.original.toFixed(2)}</td><td>${roundSAR(v.sar).toFixed(2)}</td></tr>`).join('');
     const expenseRows = data.relevantExpenses.map((e) => {
       const n = (e.participantIds || []).length || 1;
       const myShareSAR = convertToSAR(e.amount, e.currency) / n;
-      return `<tr><td>${e.date || ''}</td><td>${escapeHTML(e.desc || '')}</td><td>${escapeHTML(e.category || '')}</td><td>${e.amount} ${currencyLabels[e.currency] || e.currency}</td><td>${roundSAR(myShareSAR).toFixed(2)} ريال</td></tr>`;
+      return `<tr><td>${e.date || ''}</td><td>${escapeHTML(e.desc || '')}</td><td>${escapeHTML(e.category || '')}</td><td>${e.amount} ${curLabel(e.currency)}</td><td>${roundSAR(myShareSAR).toFixed(2)} ريال</td></tr>`;
     }).join('');
 
     return `
@@ -2026,11 +2111,11 @@
     }
 
     const categoryRows = Object.entries(data.categoryTotals).map(([cat, v]) => [cat, roundSAR(v).toFixed(2)]);
-    const currencyRows = Object.entries(data.currencyTotals).map(([cur, v]) => [currencyLabels[cur] || cur, v.original.toFixed(2), roundSAR(v.sar).toFixed(2)]);
+    const currencyRows = Object.entries(data.currencyTotals).map(([cur, v]) => [curLabel(cur), v.original.toFixed(2), roundSAR(v.sar).toFixed(2)]);
     const expenseRows = data.relevantExpenses.map((e) => {
       const n = (e.participantIds || []).length || 1;
       const myShareSAR = convertToSAR(e.amount, e.currency) / n;
-      return [e.date || '', e.desc || '', e.category || '', `${e.amount} ${currencyLabels[e.currency] || e.currency}`, roundSAR(myShareSAR).toFixed(2)];
+      return [e.date || '', e.desc || '', e.category || '', `${e.amount} ${curLabel(e.currency)}`, roundSAR(myShareSAR).toFixed(2)];
     });
 
     const document = new Document({
@@ -2256,7 +2341,7 @@
   function renderExpenseFormOptions(preservedParticipantIds) {
     if (!currentTripData) return;
     const currencies = currentTripData.currencies || ['SAR'];
-    expCurrency.innerHTML = currencies.map((c) => `<option value="${c}">${currencyLabels[c] || c}</option>`).join('');
+    expCurrency.innerHTML = currencies.map((c) => `<option value="${c}">${curLabel(c)}</option>`).join('');
 
     const active = (currentTripData.participants || []).filter((p) => p.status === 'active');
     expPayer.innerHTML = `<option value="ALL">محصّل من الكل (دفع موزّع بالتساوي — بدون دين)</option>`
@@ -2361,7 +2446,7 @@
     const categories = ['تذاكر', 'فيزا', 'سكن', 'مواصلات', 'أكل', 'زيارات', 'متفرقات'];
     filterCategory.innerHTML = '<option value="">الكل</option>' + categories.map((c) => `<option value="${c}">${c}</option>`).join('');
     const currencies = currentTripData.currencies || ['SAR'];
-    filterCurrency.innerHTML = '<option value="">الكل</option>' + currencies.map((c) => `<option value="${c}">${currencyLabels[c] || c}</option>`).join('');
+    filterCurrency.innerHTML = '<option value="">الكل</option>' + currencies.map((c) => `<option value="${c}">${curLabel(c)}</option>`).join('');
     const allParticipants = currentTripData.participants || [];
     filterPerson.innerHTML = '<option value="">الكل</option>' + allParticipants.map((p) => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('');
   }
@@ -2411,7 +2496,7 @@
         <td>${exp.date || ''}</td>
         <td>${escapeHTML(exp.desc || '')}</td>
         <td>${escapeHTML(exp.category || '')}</td>
-        <td>${(exp.amount || 0).toLocaleString('ar-SA', { maximumFractionDigits: 2 })} ${currencyLabels[exp.currency] || exp.currency}
+        <td>${(exp.amount || 0).toLocaleString('ar-SA', { maximumFractionDigits: 2 })} ${curLabel(exp.currency)}
             <div style="font-size:11px;color:var(--text-muted)">${exp.amountSAR.toLocaleString('ar-SA', { maximumFractionDigits: 2 })} ريال</div></td>
         <td>${escapeHTML(payerDisplayName(exp.payerId))}</td>
         <td>${(exp.participantIds || []).length} مشارك</td>
