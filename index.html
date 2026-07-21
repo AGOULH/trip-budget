@@ -680,7 +680,13 @@
         <select id="treasurer-select"></select>
       </div>
 
+      <div class="field" style="max-width:320px;margin-bottom:12px">
+        <label for="participants-search">بحث بالاسم</label>
+        <input type="text" id="participants-search" placeholder="اكتب اسم المشارك...">
+      </div>
+
       <div id="participants-empty" class="placeholder">لا يوجد مشاركون بعد. أضف مجموعة محفوظة أو شخصًا يدويًا.</div>
+      <div id="participants-no-match" class="placeholder" style="display:none">لا يوجد مشاركون مطابقون لبحثك.</div>
       <table class="data-table" id="participants-table" style="display:none">
         <thead><tr><th>الاسم</th><th>الجوال</th><th>الحالة</th><th>سلفة / مبلغ مقدّم</th><th></th></tr></thead>
         <tbody id="participants-tbody"></tbody>
@@ -1341,9 +1347,12 @@
 
   // ---------- إدارة المشاركين ----------
   const participantsEmpty = document.getElementById('participants-empty');
+  const participantsNoMatch = document.getElementById('participants-no-match');
   const participantsTable = document.getElementById('participants-table');
   const participantsTbody = document.getElementById('participants-tbody');
   const treasurerSelect = document.getElementById('treasurer-select');
+  const participantsSearchInput = document.getElementById('participants-search');
+  participantsSearchInput.addEventListener('input', renderParticipants);
 
   function advanceCellHTML(p) {
     if (!p.advanceDueSAR) {
@@ -1358,14 +1367,22 @@
   function renderParticipants() {
     if (!currentTripData) return;
     const participants = currentTripData.participants || [];
+    const query = participantsSearchInput.value.trim().toLowerCase();
+    const filtered = query ? participants.filter((p) => p.name.toLowerCase().includes(query)) : participants;
 
     if (!participants.length) {
       participantsEmpty.style.display = 'block';
+      participantsNoMatch.style.display = 'none';
+      participantsTable.style.display = 'none';
+    } else if (!filtered.length) {
+      participantsEmpty.style.display = 'none';
+      participantsNoMatch.style.display = 'block';
       participantsTable.style.display = 'none';
     } else {
       participantsEmpty.style.display = 'none';
+      participantsNoMatch.style.display = 'none';
       participantsTable.style.display = 'table';
-      participantsTbody.innerHTML = participants.map((p) => `
+      participantsTbody.innerHTML = filtered.map((p) => `
         <tr data-id="${p.id}">
           <td>${escapeHTML(p.name)}</td>
           <td>${escapeHTML(p.phone || '-')}</td>
