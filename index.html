@@ -598,7 +598,12 @@
         <h2 style="margin:0">قائمة الرحلات</h2>
         <button class="btn" id="btn-new-trip">+ رحلة جديدة</button>
       </div>
+      <div class="field" style="max-width:320px;margin-bottom:16px">
+        <label for="trips-search">بحث بالاسم</label>
+        <input type="text" id="trips-search" placeholder="اكتب اسم الرحلة...">
+      </div>
       <div id="trips-empty" class="placeholder">لا توجد رحلات بعد.<br>اضغط "رحلة جديدة" لإنشاء أول رحلة.</div>
+      <div id="trips-no-match" class="placeholder" style="display:none">لا توجد رحلات مطابقة لبحثك.</div>
       <div id="trips-grid" class="trips-grid"></div>
     </div>
   </section>
@@ -784,6 +789,10 @@
         <h2 style="margin:0">قائمة المصاريف</h2>
         <button class="btn" id="btn-goto-add-expense">+ إضافة مصروف</button>
       </div>
+      <div class="field" style="max-width:320px;margin-bottom:12px">
+        <label for="expenses-search">بحث بالاسم</label>
+        <input type="text" id="expenses-search" placeholder="اكتب وصف المصروف...">
+      </div>
       <div class="form-grid" style="margin-bottom:16px">
         <div class="field"><label>تصنيف</label><select id="filter-category"><option value="">الكل</option></select></div>
         <div class="field"><label>عملة</label><select id="filter-currency"><option value="">الكل</option></select></div>
@@ -815,6 +824,10 @@
         <input type="text" id="closure-stage-label">
       </div>
       <label style="font-weight:600;display:block;margin:12px 0 8px">من ينسحب الآن؟ (من النشطين)</label>
+      <div class="field" style="max-width:320px;margin-bottom:8px">
+        <label for="closure-search">بحث بالاسم</label>
+        <input type="text" id="closure-search" placeholder="اكتب اسم المشارك...">
+      </div>
       <div id="closure-picker" class="placeholder">لا يوجد مشاركون نشطون.</div>
       <div class="form-actions">
         <button class="btn secondary" id="btn-preview-closure">معاينة الحساب والتسوية</button>
@@ -836,7 +849,12 @@
 
     <div class="card">
       <h2>سجلّ الإقفالات السابقة</h2>
+      <div class="field" style="max-width:320px;margin-bottom:12px">
+        <label for="closures-search">بحث بالاسم</label>
+        <input type="text" id="closures-search" placeholder="اكتب اسم المشارك...">
+      </div>
       <div id="closures-empty" class="placeholder">لا توجد إقفالات سابقة.</div>
+      <div id="closures-no-match" class="placeholder" style="display:none">لا توجد إقفالات مطابقة لبحثك.</div>
       <div id="closures-list"></div>
     </div>
   </section>
@@ -1253,6 +1271,9 @@
   // ---------- قائمة الرحلات (استماع حي) ----------
   const tripsGrid = document.getElementById('trips-grid');
   const tripsEmpty = document.getElementById('trips-empty');
+  const tripsNoMatch = document.getElementById('trips-no-match');
+  const tripsSearchInput = document.getElementById('trips-search');
+  tripsSearchInput.addEventListener('input', renderTripsList);
   const currencyLabels = { SAR: 'ريال', USD: 'دولار', IQD: 'دينار عراقي' };
   function curLabel(code, trip) {
     const names = (trip || currentTripData || {}).currencyNames || {};
@@ -1287,6 +1308,27 @@
     return div.innerHTML;
   }
 
+  function renderTripsList() {
+    if (!currentTripsList.length) {
+      tripsEmpty.style.display = 'block';
+      tripsNoMatch.style.display = 'none';
+      tripsGrid.innerHTML = '';
+      return;
+    }
+    const query = tripsSearchInput.value.trim().toLowerCase();
+    const filtered = query ? currentTripsList.filter((t) => (t.name || '').toLowerCase().includes(query)) : currentTripsList;
+
+    if (!filtered.length) {
+      tripsEmpty.style.display = 'none';
+      tripsNoMatch.style.display = 'block';
+      tripsGrid.innerHTML = '';
+      return;
+    }
+    tripsEmpty.style.display = 'none';
+    tripsNoMatch.style.display = 'none';
+    tripsGrid.innerHTML = filtered.map((t) => tripCardHTML(t.id, t)).join('');
+  }
+
   onSnapshot(
     query(collection(db, 'trips'), orderBy('createdAt', 'desc')),
     (snapshot) => {
@@ -1295,15 +1337,7 @@
       statusText.textContent = `متصل بقاعدة البيانات (${snapshot.size} رحلة)`;
 
       currentTripsList = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
-
-      if (snapshot.empty) {
-        tripsEmpty.style.display = 'block';
-        tripsGrid.innerHTML = '';
-        return;
-      }
-
-      tripsEmpty.style.display = 'none';
-      tripsGrid.innerHTML = currentTripsList.map((t) => tripCardHTML(t.id, t)).join('');
+      renderTripsList();
     },
     (err) => {
       statusEl.classList.add('error');
@@ -1870,24 +1904,43 @@
   const closurePreviewTbody = document.getElementById('closure-preview-tbody');
   const closureSettlementLines = document.getElementById('closure-settlement-lines');
   const closureStageLabel = document.getElementById('closure-stage-label');
+  const closureSearchInput = document.getElementById('closure-search');
+  let closureSelectedIds = new Set();
 
   function renderClosurePicker() {
     if (!currentTripData) return;
     const active = (currentTripData.participants || []).filter((p) => p.status === 'active');
+    const activeIds = new Set(active.map((p) => p.id));
+    closureSelectedIds.forEach((id) => { if (!activeIds.has(id)) closureSelectedIds.delete(id); });
+
     if (!active.length) {
       closurePicker.innerHTML = '<div class="placeholder">لا يوجد مشاركون نشطون.</div>';
       return;
     }
-    closurePicker.innerHTML = active.map((p) => `
+    const query = closureSearchInput.value.trim().toLowerCase();
+    const filtered = query ? active.filter((p) => p.name.toLowerCase().includes(query)) : active;
+    if (!filtered.length) {
+      closurePicker.innerHTML = '<div class="placeholder">لا يوجد مشاركون مطابقون لبحثك.</div>';
+      return;
+    }
+    closurePicker.innerHTML = filtered.map((p) => `
       <div class="checkbox-row"><label style="display:flex;align-items:center;gap:8px;margin:0">
-        <input type="checkbox" class="closure-cb" value="${p.id}"> ${escapeHTML(p.name)}
+        <input type="checkbox" class="closure-cb" value="${p.id}" ${closureSelectedIds.has(p.id) ? 'checked' : ''}> ${escapeHTML(p.name)}
       </label></div>
     `).join('');
     closurePreview.style.display = 'none';
   }
 
+  closureSearchInput.addEventListener('input', renderClosurePicker);
+
+  closurePicker.addEventListener('change', (e) => {
+    if (!e.target.classList.contains('closure-cb')) return;
+    if (e.target.checked) closureSelectedIds.add(e.target.value);
+    else closureSelectedIds.delete(e.target.value);
+  });
+
   document.getElementById('btn-preview-closure').addEventListener('click', () => {
-    const selectedIds = [...closurePicker.querySelectorAll('.closure-cb:checked')].map((cb) => cb.value);
+    const selectedIds = [...closureSelectedIds];
     if (!closureStageLabel.value.trim()) {
       showToast('الرجاء إدخال وصف المرحلة', true);
       return;
@@ -1955,6 +2008,7 @@
       showToast('تم إقفال الميزانية للمحددين');
       closureStageLabel.value = '';
       closurePreview.style.display = 'none';
+      closureSelectedIds.clear();
     } catch (err) {
       console.error('Closure error:', err);
       showToast('تعذّر إقفال الميزانية', true);
@@ -1963,16 +2017,32 @@
 
   // ---------- سجلّ الإقفالات ----------
   const closuresEmpty = document.getElementById('closures-empty');
+  const closuresNoMatch = document.getElementById('closures-no-match');
   const closuresList = document.getElementById('closures-list');
+  const closuresSearchInput = document.getElementById('closures-search');
+  closuresSearchInput.addEventListener('input', renderClosuresList);
 
   function renderClosuresList() {
     if (!currentClosures.length) {
       closuresEmpty.style.display = 'block';
+      closuresNoMatch.style.display = 'none';
+      closuresList.innerHTML = '';
+      return;
+    }
+    const query = closuresSearchInput.value.trim().toLowerCase();
+    const filteredClosures = query
+      ? currentClosures.filter((c) => (c.participantIds || []).some((id) => participantName(id).toLowerCase().includes(query)))
+      : currentClosures;
+
+    if (!filteredClosures.length) {
+      closuresEmpty.style.display = 'none';
+      closuresNoMatch.style.display = 'block';
       closuresList.innerHTML = '';
       return;
     }
     closuresEmpty.style.display = 'none';
-    closuresList.innerHTML = currentClosures.map((c) => {
+    closuresNoMatch.style.display = 'none';
+    closuresList.innerHTML = filteredClosures.map((c) => {
       const names = (c.participantIds || []).map((id) => participantName(id)).join('، ');
       const snapshotRows = (c.snapshot || []).map((s) => `
         <tr>
@@ -2613,11 +2683,13 @@
   const filterCategory = document.getElementById('filter-category');
   const filterCurrency = document.getElementById('filter-currency');
   const filterPerson = document.getElementById('filter-person');
+  const expensesSearchInput = document.getElementById('expenses-search');
   const expensesEmpty = document.getElementById('expenses-empty');
   const expensesTable = document.getElementById('expenses-table');
   const expensesTbody = document.getElementById('expenses-tbody');
   let sortKey = 'date';
   let sortDir = 'desc';
+  expensesSearchInput.addEventListener('input', renderExpensesTable);
 
   function renderExpensesFilters() {
     if (!currentTripData) return;
@@ -2653,6 +2725,8 @@
     if (filterCategory.value) rows = rows.filter((r) => r.category === filterCategory.value);
     if (filterCurrency.value) rows = rows.filter((r) => r.currency === filterCurrency.value);
     if (filterPerson.value) rows = rows.filter((r) => (r.participantIds || []).includes(filterPerson.value));
+    const searchQuery = expensesSearchInput.value.trim().toLowerCase();
+    if (searchQuery) rows = rows.filter((r) => (r.desc || '').toLowerCase().includes(searchQuery));
 
     rows.sort((a, b) => {
       let av = a[sortKey], bv = b[sortKey];
