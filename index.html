@@ -10,7 +10,7 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.umd.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/html2canvas-pro@1.5.8/dist/html2canvas-pro.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   :root {
@@ -900,6 +900,10 @@
     <div class="card">
       <h2>التقارير</h2>
       <div class="field" style="max-width:320px">
+        <label for="report-search">بحث بالاسم</label>
+        <input type="text" id="report-search" placeholder="اكتب اسم المشارك...">
+      </div>
+      <div class="field" style="max-width:320px">
         <label for="report-person-select">اختر شخصًا</label>
         <select id="report-person-select"></select>
       </div>
@@ -1445,7 +1449,10 @@
     const activeCount = participants.filter((p) => p.status === 'active').length;
     const totalPaid = participants.reduce((s, p) => s + (paidById[p.id] || 0), 0);
 
-    const rowsHTML = participants.map((p, i) => `
+    const query = participantsSearchInput.value.trim().toLowerCase();
+    const filtered = query ? participants.filter((p) => p.name.toLowerCase().includes(query)) : participants;
+
+    const rowsHTML = filtered.map((p, i) => `
       <tr>
         <td>${i + 1}</td>
         <td>${escapeHTML(p.name)}</td>
@@ -1793,7 +1800,7 @@
   function computeBalances(expensesList) {
     const balances = {};
     (currentTripData.participants || []).forEach((p) => {
-      balances[p.id] = { paid: 0, share: 0, surplus: 0 };
+      balances[p.id] = { paid: 0, share: 0, surplus: 0, self: 0 };
     });
 
     expensesList.forEach((exp) => {
@@ -1801,22 +1808,19 @@
       const ids = exp.participantIds || [];
 
       if (exp.payerId === 'ALL') {
-        // محصّل من الكل: كل مشارك يُعتبر دافعًا لنصيبه بالضبط (بدون دين لهذا المصروف)
-        if (ids.length) {
-          const perPerson = amountSAR / ids.length;
-          ids.forEach((pid) => {
-            if (!balances[pid]) balances[pid] = { paid: 0, share: 0, surplus: 0 };
-            balances[pid].paid += perPerson;
-          });
-        }
+        // محصّل من الكل: يُموَّل من المبالغ المجمّعة (السلفة) — لا يُعتبر دفعًا فعليًا
+        // من أحد، فلا يُضاف شيء لـ"paid" هنا (السلفة نفسها هي ما يُحتسب كمدفوع).
       } else {
-        if (!balances[exp.payerId]) balances[exp.payerId] = { paid: 0, share: 0, surplus: 0 };
+        if (!balances[exp.payerId]) balances[exp.payerId] = { paid: 0, share: 0, surplus: 0, self: 0 };
         balances[exp.payerId].paid += amountSAR;
         // مصروف "لنفسه فقط" (هو الدافع والمشارك الوحيد) يُعتبر ممولًا من صندوقه/سلفته
-        // فلا يُضاف شيء إضافي. أي مصروف آخر يدفعه فعليًا ويشمل غيره (حتى لو شارك هو فيه)
-        // يُضاف بكامل مبلغه فوق سلفته — لأنه مال حقيقي دفعه لتغطية المجموعة.
+        // فيُحتسب ضمن "self" (يُلغي أثره مع نصيبه من نفس المصروف، فلا يغيّر صافيه).
+        // أي مصروف آخر يدفعه فعليًا ويشمل غيره (حتى لو شارك هو فيه) يُضاف بكامل مبلغه
+        // كفائض (surplus) فوق سلفته — لأنه مال حقيقي دفعه لتغطية المجموعة.
         const isSelfOnly = ids.length === 1 && ids[0] === exp.payerId;
-        if (!isSelfOnly) {
+        if (isSelfOnly) {
+          balances[exp.payerId].self += amountSAR;
+        } else {
           balances[exp.payerId].surplus += amountSAR;
         }
       }
@@ -1824,7 +1828,7 @@
       if (!ids.length) return;
       const share = amountSAR / ids.length;
       ids.forEach((pid) => {
-        if (!balances[pid]) balances[pid] = { paid: 0, share: 0, surplus: 0 };
+        if (!balances[pid]) balances[pid] = { paid: 0, share: 0, surplus: 0, self: 0 };
         balances[pid].share += share;
       });
     });
@@ -1832,7 +1836,7 @@
     return balances;
   }
 
-  // balancesSummary(expensesList) -> { rows:[{id,name,paidSAR,shareSAR,surplusSAR,netSAR}], totalCheck }
+  // balancesSummary(expensesList) -> { rows:[{id,name,paidSAR,shareSAR,surplusSAR,selfSAR,netSAR}], totalCheck }
   function balancesSummary(expensesList) {
     const balances = computeBalances(expensesList);
     const rows = Object.entries(balances).map(([id, b]) => ({
@@ -1841,20 +1845,22 @@
       paidSAR: b.paid,
       shareSAR: b.share,
       surplusSAR: b.surplus,
+      selfSAR: b.self,
       netSAR: b.paid - b.share
     }));
     const totalCheck = rows.reduce((s, r) => s + r.netSAR, 0);
     return { rows, totalCheck };
   }
 
-  // المبلغ المدفوع مسبقًا (قبل الرحلة) يحل محل "ما دفعه" المحسوب من نصيبه هو فقط من
-  // المصاريف (لأن ذلك جزء من نفس المبلغ المجمّع)، لكن أي مبلغ دفعه فعليًا لتغطية نصيب
-  // غيره (فائض) يُضاف فوق المبلغ المدفوع مسبقًا لأنه مال حقيقي إضافي يستحق أن يُحتسب له.
+  // "ما دفعه" الفعلي لكل شخص = السلفة/المبلغ المقدّم (ما سلّمه فعلًا للمحصّل، ٠ لو لم
+  // يدفع بعد — قد يتأخر البعض حتى بعد الرحلة) + أي فائض دفعه شخصيًا لتغطية غيره +
+  // مصاريفه الخاصة (لنفسه فقط، تُلغي أثرها مع نصيبها). مصاريف "محصّل من الكل" لا تُحتسب
+  // دفعًا تلقائيًا لأحد — فمن لم يسلّم سلفته بعد يظهر نصيبه عليه (بالسالب) وليس صفرًا.
   function advanceAdjustedRows(rows) {
     return rows.map((r) => {
       const p = getParticipantById(r.id);
       const advanceDueSAR = (p && p.advanceDueSAR) || 0;
-      const paidSAR = advanceDueSAR > 0 ? advanceDueSAR + (r.surplusSAR || 0) : r.paidSAR;
+      const paidSAR = advanceDueSAR + (r.surplusSAR || 0) + (r.selfSAR || 0);
       return { ...r, advanceDueSAR, paidSAR, netSAR: paidSAR - r.shareSAR };
     });
   }
@@ -2159,14 +2165,15 @@
     });
 
     // دفع مقابل نصيب لكل شخص
+    const adjustedRows = advanceAdjustedRows(rows);
     destroyChart('paidShare');
     charts.paidShare = new Chart(document.getElementById('chart-paid-share'), {
       type: 'bar',
       data: {
-        labels: rows.map((r) => r.name),
+        labels: adjustedRows.map((r) => r.name),
         datasets: [
-          { label: 'دفع', data: rows.map((r) => roundSAR(r.paidSAR)), backgroundColor: CHART_GREEN, borderRadius: 4, maxBarThickness: 24 },
-          { label: 'نصيبه', data: rows.map((r) => roundSAR(r.shareSAR)), backgroundColor: CHART_GOLD, borderRadius: 4, maxBarThickness: 24 }
+          { label: 'دفع', data: adjustedRows.map((r) => roundSAR(r.paidSAR)), backgroundColor: CHART_GREEN, borderRadius: 4, maxBarThickness: 24 },
+          { label: 'نصيبه', data: adjustedRows.map((r) => roundSAR(r.shareSAR)), backgroundColor: CHART_GOLD, borderRadius: 4, maxBarThickness: 24 }
         ]
       },
       options: { plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true, grid: { color: '#eef1f2' } }, x: { grid: { display: false } } } }
@@ -2206,13 +2213,23 @@
   // ---------- التقارير ----------
   const reportPersonSelect = document.getElementById('report-person-select');
   const reportPreview = document.getElementById('report-preview');
+  const reportSearchInput = document.getElementById('report-search');
 
   function renderReportPersonSelect() {
     if (!currentTripData) return;
-    reportPersonSelect.innerHTML = (currentTripData.participants || [])
-      .map((p) => `<option value="${p.id}">${escapeHTML(p.name)}${p.status === 'closed' ? ' (مقفل)' : ''}</option>`)
-      .join('');
+    const previousValue = reportPersonSelect.value;
+    const query = reportSearchInput.value.trim().toLowerCase();
+    const participants = (currentTripData.participants || [])
+      .filter((p) => !query || p.name.toLowerCase().includes(query));
+    reportPersonSelect.innerHTML = participants.length
+      ? participants.map((p) => `<option value="${p.id}">${escapeHTML(p.name)}${p.status === 'closed' ? ' (مقفل)' : ''}</option>`).join('')
+      : '<option value="">لا يوجد مشاركون مطابقون</option>';
+    if (participants.some((p) => p.id === previousValue)) {
+      reportPersonSelect.value = previousValue;
+    }
   }
+
+  reportSearchInput.addEventListener('input', renderReportPersonSelect);
 
   function buildPersonReportData(participant) {
     const isClosed = participant.status === 'closed';
@@ -2407,12 +2424,13 @@
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
-  // نبني PDF التقرير يدويًا: نحوّل العنصر لصورة (canvas) واحدة عبر محرّك html2pdf
-  // الداخلي، ثم نضعها كصورة واحدة على صفحة PDF بنفس أبعادها بالضبط (بكسل=بكسل) عبر
-  // jsPDF مباشرة. هذا يتجنّب تمامًا منطق تقسيم html2pdf التلقائي للصفحات (الذي كان
-  // يُنتج أحيانًا صفحات إضافية فارغة) — نفس أسلوب تطبيق كأس العالم المرجعي.
+  // نبني PDF التقرير يدويًا: نحوّل العنصر لصورة (canvas) واحدة عبر html2canvas-pro
+  // (نسخة محدّثة تدعم ألوان CSS الحديثة — النسخة القديمة المرفقة مع html2pdf.js كانت
+  // تُنتج صورة فارغة تمامًا على متصفحات كروم الحديثة رغم عدم ظهور أي خطأ)، ثم نضعها
+  // كصورة واحدة على صفحة PDF بنفس أبعادها بالضبط (بكسل=بكسل) عبر jsPDF مباشرة —
+  // نفس أسلوب تطبيق كأس العالم المرجعي.
   async function renderReportPdfBlob(el) {
-    const canvas = await html2pdf().set({ html2canvas: { scale: 2, useCORS: true } }).from(el).toCanvas().get('canvas');
+    const canvas = await html2canvas(el, { scale: 2, useCORS: true, backgroundColor: '#ffffff' });
     const imgData = canvas.toDataURL('image/jpeg', 0.95);
     const { jsPDF } = window.jspdf;
     const pdf = new jsPDF({
