@@ -2283,9 +2283,9 @@
     };
   }
 
-  // كشف حساب مصاريفه: لكل مصروف شارك فيه — "المدفوعات" = كامل المبلغ لو هو من دفعه
-  // فعليًا لهذا المصروف تحديدًا (وإلا فصفر)، و"الرصيد" رصيد متراكم يبدأ من مجموع ما
-  // دفعه فعلًا (مبلغه المقدّم + أي دفعات خارج هذا الجدول) ثم يتحرّك مع كل سطر، لينتهي
+  // كشف حساب مصاريفه: "نصيبه" (بالريال) لكل مصروف شارك فيه، و"الرصيد" رصيد متراكم
+  // يبدأ من مجموع ما دفعه فعلًا (مبلغه المقدّم + أي دفعات خارج هذا الجدول) ثم يتحرّك
+  // مع كل سطر (ناقص نصيبه، زائد أي مبلغ دفعه هو فعليًا لهذا المصروف تحديدًا)، لينتهي
   // مطابقًا تمامًا لـ"الصافي" أعلى التقرير.
   function personLedgerRows(data) {
     const paidWithinRows = data.relevantExpenses.reduce((s, e) =>
@@ -2299,8 +2299,7 @@
       running += myPaidSAR - myShareSAR;
       return {
         date: e.date || '', desc: e.desc || '', category: e.category || '',
-        amountDisplay: `${e.amount} ${curLabel(e.currency)}`,
-        paidSAR: myPaidSAR, balanceSAR: running
+        shareSAR: myShareSAR, balanceSAR: running
       };
     });
   }
@@ -2338,7 +2337,7 @@
     const currencyRows = Object.entries(data.currencyTotals)
       .map(([cur, v]) => `<tr><td>${curLabel(cur)}</td><td>${v.original.toFixed(2)}</td><td>${roundSAR(v.sar).toFixed(2)}</td></tr>`).join('');
     const expenseRows = personLedgerRows(data).map((r) =>
-      `<tr><td>${r.date}</td><td>${escapeHTML(r.desc)}</td><td>${escapeHTML(r.category)}</td><td>${r.amountDisplay}</td><td>${roundSAR(r.paidSAR).toFixed(2)} ريال</td><td>${roundSAR(r.balanceSAR).toFixed(2)} ريال</td></tr>`
+      `<tr><td>${r.date}</td><td>${escapeHTML(r.desc)}</td><td>${escapeHTML(r.category)}</td><td>${roundSAR(r.shareSAR).toFixed(2)} ريال</td><td>${roundSAR(r.balanceSAR).toFixed(2)} ريال</td></tr>`
     ).join('');
 
     return `
@@ -2366,7 +2365,7 @@
         </table>
         <h3>مصاريفه</h3>
         <table style="width:100%;border-collapse:collapse;margin-bottom:16px" border="1" cellpadding="6">
-          <tr><th>التاريخ</th><th>الوصف</th><th>التصنيف</th><th>المبلغ</th><th>المدفوعات</th><th>الرصيد</th></tr>${expenseRows}
+          <tr><th>التاريخ</th><th>الوصف</th><th>التصنيف</th><th>نصيبه (ريال)</th><th>الرصيد</th></tr>${expenseRows}
         </table>
         <h3>التسوية</h3>
         <div>${settlementLineText(data)}</div>
@@ -2398,7 +2397,7 @@
     const categoryRows = Object.entries(data.categoryTotals).map(([cat, v]) => [cat, roundSAR(v).toFixed(2)]);
     const currencyRows = Object.entries(data.currencyTotals).map(([cur, v]) => [curLabel(cur), v.original.toFixed(2), roundSAR(v.sar).toFixed(2)]);
     const expenseRows = personLedgerRows(data).map((r) =>
-      [r.date, r.desc, r.category, r.amountDisplay, roundSAR(r.paidSAR).toFixed(2), roundSAR(r.balanceSAR).toFixed(2)]
+      [r.date, r.desc, r.category, roundSAR(r.shareSAR).toFixed(2), roundSAR(r.balanceSAR).toFixed(2)]
     );
 
     const document = new Document({
@@ -2420,7 +2419,7 @@
           simpleTable(['العملة', 'نصيبه بالعملة الأصلية', 'المكافئ بالريال'], currencyRows),
           rtlPara(' '),
           rtlPara('مصاريفه', { heading: HeadingLevel.HEADING_2 }),
-          simpleTable(['التاريخ', 'الوصف', 'التصنيف', 'المبلغ', 'المدفوعات', 'الرصيد'], expenseRows),
+          simpleTable(['التاريخ', 'الوصف', 'التصنيف', 'نصيبه (ريال)', 'الرصيد'], expenseRows),
           rtlPara(' '),
           rtlPara('التسوية', { heading: HeadingLevel.HEADING_2 }),
           rtlPara(settlementLineText(data))
