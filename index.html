@@ -694,7 +694,7 @@
       <div id="participants-empty" class="placeholder">لا يوجد مشاركون بعد. أضف مجموعة محفوظة أو شخصًا يدويًا.</div>
       <div id="participants-no-match" class="placeholder" style="display:none">لا يوجد مشاركون مطابقون لبحثك.</div>
       <table class="data-table" id="participants-table" style="display:none">
-        <thead><tr><th>الاسم</th><th>الجوال</th><th>الحالة</th><th>سلفة / مبلغ مقدّم</th><th></th></tr></thead>
+        <thead><tr><th>الاسم</th><th>الجوال</th><th>الحالة</th><th>مبلغ مقدّم</th><th></th></tr></thead>
         <tbody id="participants-tbody"></tbody>
       </table>
     </div>
@@ -720,10 +720,10 @@
         <div class="field"><label for="manual-name">الاسم</label><input type="text" id="manual-name" required></div>
         <div class="field"><label for="manual-phone">الجوال (اختياري)</label><input type="text" id="manual-phone"></div>
         <div class="field full">
-          <label for="manual-advance">سلفة / مبلغ مقدّم منه (ريال) — اختياري</label>
+          <label for="manual-advance">مبلغ مقدّم منه (ريال) — اختياري</label>
           <input type="number" id="manual-advance" min="0" step="0.01" placeholder="مثال: مبلغ سلّمه للمحصّل عند الانضمام">
         </div>
-        <div class="full form-note">إذا كان هذا الشخص قد سلّم مبلغًا مقدّمًا (سلفة) للمحصّل عند انضمامه، أدخل قيمته هنا — يُحتسب كأنه دفعه فعلًا من لحظة التسجيل، ويُخصم منه نصيبه من المصاريف تلقائيًا (فيصير رصيده له أو عليه حسب الفرق).</div>
+        <div class="full form-note">إذا كان هذا الشخص قد سلّم مبلغًا مقدّمًا للمحصّل عند انضمامه، أدخل قيمته هنا — يُحتسب كأنه دفعه فعلًا من لحظة التسجيل، ويُخصم منه نصيبه من المصاريف تلقائيًا (فيصير رصيده له أو عليه حسب الفرق).</div>
         <div class="full form-actions">
           <button type="submit" class="btn">إضافة</button>
           <button type="button" class="btn secondary" id="btn-cancel-manual">إلغاء</button>
@@ -1395,7 +1395,7 @@
 
   function advanceCellHTML(p) {
     if (!p.advanceDueSAR) {
-      return `<button class="btn-icon" data-action="set-advance">+ سلفة</button>`;
+      return `<button class="btn-icon" data-action="set-advance">+ مبلغ مقدّم</button>`;
     }
     return `
       <span class="status-badge advance">${p.advanceDueSAR.toFixed(2)} ريال</span>
@@ -1524,7 +1524,7 @@
       await updateDoc(doc(db, 'trips', currentTripId), patch);
     } else if (action === 'set-advance' || action === 'edit-advance') {
       const p = getParticipantById(pid);
-      const input = prompt('مبلغ السلفة / المبلغ المقدّم (ريال):', p && p.advanceDueSAR ? p.advanceDueSAR : '');
+      const input = prompt('المبلغ المقدّم (ريال):', p && p.advanceDueSAR ? p.advanceDueSAR : '');
       if (input === null) return;
       const amount = parseFloat(input) || 0;
       const updated = currentTripData.participants.map((x) =>
@@ -1780,7 +1780,7 @@
   }
 
   function payerDisplayName(id) {
-    return id === 'ALL' ? 'محصّل من الكل' : participantName(id);
+    return id === 'ALL' ? 'من الميزانية' : participantName(id);
   }
 
   function convertToSAR(amount, currency) {
@@ -1808,8 +1808,8 @@
       const ids = exp.participantIds || [];
 
       if (exp.payerId === 'ALL') {
-        // محصّل من الكل: يُموَّل من المبالغ المجمّعة (السلفة) — لا يُعتبر دفعًا فعليًا
-        // من أحد، فلا يُضاف شيء لـ"paid" هنا (السلفة نفسها هي ما يُحتسب كمدفوع).
+        // من الميزانية: يُموَّل من المبالغ المقدّمة — لا يُعتبر دفعًا فعليًا من أحد،
+        // فلا يُضاف شيء لـ"paid" هنا (المبلغ المقدّم نفسه هو ما يُحتسب كمدفوع).
       } else {
         if (!balances[exp.payerId]) balances[exp.payerId] = { paid: 0, share: 0, surplus: 0, self: 0 };
         balances[exp.payerId].paid += amountSAR;
@@ -1852,10 +1852,10 @@
     return { rows, totalCheck };
   }
 
-  // "ما دفعه" الفعلي لكل شخص = السلفة/المبلغ المقدّم (ما سلّمه فعلًا للمحصّل، ٠ لو لم
-  // يدفع بعد — قد يتأخر البعض حتى بعد الرحلة) + أي فائض دفعه شخصيًا لتغطية غيره +
-  // مصاريفه الخاصة (لنفسه فقط، تُلغي أثرها مع نصيبها). مصاريف "محصّل من الكل" لا تُحتسب
-  // دفعًا تلقائيًا لأحد — فمن لم يسلّم سلفته بعد يظهر نصيبه عليه (بالسالب) وليس صفرًا.
+  // "ما دفعه" الفعلي لكل شخص = المبلغ المقدّم (ما سلّمه فعلًا للمحصّل، ٠ لو لم يدفع
+  // بعد — قد يتأخر البعض حتى بعد الرحلة) + أي فائض دفعه شخصيًا لتغطية غيره + مصاريفه
+  // الخاصة (لنفسه فقط، تُلغي أثرها مع نصيبها). مصاريف "من الميزانية" لا تُحتسب دفعًا
+  // تلقائيًا لأحد — فمن لم يقدّم مبلغه بعد يظهر نصيبه عليه (بالسالب) وليس صفرًا.
   function advanceAdjustedRows(rows) {
     return rows.map((r) => {
       const p = getParticipantById(r.id);
@@ -1968,7 +1968,7 @@
         <td>${escapeHTML(r.name)}</td>
         <td>${roundSAR(r.paidSAR).toFixed(2)}</td>
         <td>${roundSAR(r.shareSAR).toFixed(2)}</td>
-        <td>${roundSAR(r.netSAR).toFixed(2)}${r.advanceDueSAR ? ` <span class="status-badge advance">سلفة ${r.advanceDueSAR.toFixed(2)}</span>` : ''}</td>
+        <td>${roundSAR(r.netSAR).toFixed(2)}${r.advanceDueSAR ? ` <span class="status-badge advance">مقدّم ${r.advanceDueSAR.toFixed(2)}</span>` : ''}</td>
       </tr>
     `).join('');
 
@@ -2264,7 +2264,7 @@
     });
 
     // ما دفعه هذا الشخص فعليًا لتغطية غيره (كدافع فردي لمصروف يشمل أكثر منه، وليس
-    // "محصّل من الكل" ولا مصروفًا لنفسه فقط) مقسّمًا حسب التصنيف — يُعرض في التقرير
+    // "من الميزانية" ولا مصروفًا لنفسه فقط) مقسّمًا حسب التصنيف — يُعرض في التقرير
     // أسفل إجمالي ما دفعه، ليتضح مثلاً أنه هو من دفع مبلغ السكن.
     const paidByCategory = {};
     currentExpenses.forEach((e) => {
@@ -2281,6 +2281,28 @@
       paidByCategory,
       advanceDueSAR: participant.advanceDueSAR || 0
     };
+  }
+
+  // كشف حساب مصاريفه: لكل مصروف شارك فيه — "المدفوعات" = كامل المبلغ لو هو من دفعه
+  // فعليًا لهذا المصروف تحديدًا (وإلا فصفر)، و"الرصيد" رصيد متراكم يبدأ من مجموع ما
+  // دفعه فعلًا (مبلغه المقدّم + أي دفعات خارج هذا الجدول) ثم يتحرّك مع كل سطر، لينتهي
+  // مطابقًا تمامًا لـ"الصافي" أعلى التقرير.
+  function personLedgerRows(data) {
+    const paidWithinRows = data.relevantExpenses.reduce((s, e) =>
+      s + (e.payerId === data.participant.id ? convertToSAR(e.amount, e.currency) : 0), 0);
+    let running = data.paidSAR - paidWithinRows;
+    return data.relevantExpenses.map((e) => {
+      const n = (e.participantIds || []).length || 1;
+      const amountSAR = convertToSAR(e.amount, e.currency);
+      const myShareSAR = amountSAR / n;
+      const myPaidSAR = e.payerId === data.participant.id ? amountSAR : 0;
+      running += myPaidSAR - myShareSAR;
+      return {
+        date: e.date || '', desc: e.desc || '', category: e.category || '',
+        amountDisplay: `${e.amount} ${curLabel(e.currency)}`,
+        paidSAR: myPaidSAR, balanceSAR: running
+      };
+    });
   }
 
   // شعار زخرفي شفاف يوضع في زاوية التقرير (أسفل يمين) — Data URI مضمّن كي يظهر
@@ -2315,11 +2337,9 @@
       .map(([cat, v]) => `<tr><td>${escapeHTML(cat)}</td><td>${roundSAR(v).toFixed(2)}</td></tr>`).join('');
     const currencyRows = Object.entries(data.currencyTotals)
       .map(([cur, v]) => `<tr><td>${curLabel(cur)}</td><td>${v.original.toFixed(2)}</td><td>${roundSAR(v.sar).toFixed(2)}</td></tr>`).join('');
-    const expenseRows = data.relevantExpenses.map((e) => {
-      const n = (e.participantIds || []).length || 1;
-      const myShareSAR = convertToSAR(e.amount, e.currency) / n;
-      return `<tr><td>${e.date || ''}</td><td>${escapeHTML(e.desc || '')}</td><td>${escapeHTML(e.category || '')}</td><td>${e.amount} ${curLabel(e.currency)}</td><td>${roundSAR(myShareSAR).toFixed(2)} ريال</td></tr>`;
-    }).join('');
+    const expenseRows = personLedgerRows(data).map((r) =>
+      `<tr><td>${r.date}</td><td>${escapeHTML(r.desc)}</td><td>${escapeHTML(r.category)}</td><td>${r.amountDisplay}</td><td>${roundSAR(r.paidSAR).toFixed(2)} ريال</td><td>${roundSAR(r.balanceSAR).toFixed(2)} ريال</td></tr>`
+    ).join('');
 
     return `
       <div style="position:relative;font-family:Cairo,sans-serif;direction:rtl;text-align:right;padding:16px;max-width:760px;margin:0 auto;background:#fff;color:#1e2a2f">
@@ -2346,7 +2366,7 @@
         </table>
         <h3>مصاريفه</h3>
         <table style="width:100%;border-collapse:collapse;margin-bottom:16px" border="1" cellpadding="6">
-          <tr><th>التاريخ</th><th>الوصف</th><th>التصنيف</th><th>المبلغ</th><th>نصيبه</th></tr>${expenseRows}
+          <tr><th>التاريخ</th><th>الوصف</th><th>التصنيف</th><th>المبلغ</th><th>المدفوعات</th><th>الرصيد</th></tr>${expenseRows}
         </table>
         <h3>التسوية</h3>
         <div>${settlementLineText(data)}</div>
@@ -2377,11 +2397,9 @@
 
     const categoryRows = Object.entries(data.categoryTotals).map(([cat, v]) => [cat, roundSAR(v).toFixed(2)]);
     const currencyRows = Object.entries(data.currencyTotals).map(([cur, v]) => [curLabel(cur), v.original.toFixed(2), roundSAR(v.sar).toFixed(2)]);
-    const expenseRows = data.relevantExpenses.map((e) => {
-      const n = (e.participantIds || []).length || 1;
-      const myShareSAR = convertToSAR(e.amount, e.currency) / n;
-      return [e.date || '', e.desc || '', e.category || '', `${e.amount} ${curLabel(e.currency)}`, roundSAR(myShareSAR).toFixed(2)];
-    });
+    const expenseRows = personLedgerRows(data).map((r) =>
+      [r.date, r.desc, r.category, r.amountDisplay, roundSAR(r.paidSAR).toFixed(2), roundSAR(r.balanceSAR).toFixed(2)]
+    );
 
     const document = new Document({
       sections: [{
@@ -2402,7 +2420,7 @@
           simpleTable(['العملة', 'نصيبه بالعملة الأصلية', 'المكافئ بالريال'], currencyRows),
           rtlPara(' '),
           rtlPara('مصاريفه', { heading: HeadingLevel.HEADING_2 }),
-          simpleTable(['التاريخ', 'الوصف', 'التصنيف', 'المبلغ', 'نصيبه'], expenseRows),
+          simpleTable(['التاريخ', 'الوصف', 'التصنيف', 'المبلغ', 'المدفوعات', 'الرصيد'], expenseRows),
           rtlPara(' '),
           rtlPara('التسوية', { heading: HeadingLevel.HEADING_2 }),
           rtlPara(settlementLineText(data))
@@ -2543,25 +2561,26 @@
       body: `بعد إنشاء الرحلة، ادخل عليها من القائمة لفتح شاشاتها. من "إدارة المشاركين" أضف
       الأشخاص، ثم حدّد "المحصّل" (أمين الصندوق) — وهو الشخص الذي يستلم من المدينين ويوزّع
       على الدائنين عند التسوية. لازم تحدّد محصّلًا قبل ما تقدر تقفل أي ميزانية.
-      إذا كان أحد المشاركين قد سلّم مبلغًا مقدّمًا (سلفة) للمحصّل عند انضمامه — وهذا هو الوضع
+      إذا كان أحد المشاركين قد سلّم مبلغًا مقدّمًا للمحصّل عند انضمامه — وهذا هو الوضع
       المعتاد: قبل الرحلة يجمع كل شخص مبلغًا تقريبيًا حسب استطاعته في صندوق الرحلة — أدخل
-      هذا المبلغ عند الإضافة اليدوية أو لاحقًا بزر "+ سلفة" في جدول المشاركين. هذا المبلغ
-      يظهر في تقريره كسطر ثابت "مدفوع مسبقًا" لا يتغيّر، ويُخصم من مجموعه نصيبه من كل
-      مصروف يشارك فيه تلقائيًا، فيصير رصيده له أو عليه حسب الفرق. لكن لو كان هذا الشخص
-      نفسه هو من **دفع فعليًا** مصروفًا يشمل غيره (مثل دفع قيمة السكن لكل المجموعة)، يُضاف
-      كامل ذلك المبلغ في سطر جديد منفصل ("دفع [التصنيف]") فوق سلفته الثابتة — لأنه مال
-      حقيقي إضافي دفعه من جيبه لتغطية المجموعة — وآخر سطر "مجموع الدفع" يجمع كل هذه
-      المبالغ. أما لو دفع مصروفًا لنفسه فقط فلا يُضاف شيء، لأن ذلك يُفترض أنه مموَّل من
-      نفس سلفته.`
+      هذا المبلغ عند الإضافة اليدوية أو لاحقًا بزر "+ مبلغ مقدّم" في جدول المشاركين. هذا
+      المبلغ يظهر في تقريره كسطر ثابت "مدفوع مسبقًا" لا يتغيّر، ويُخصم من مجموعه نصيبه من
+      كل مصروف يشارك فيه تلقائيًا، فيصير رصيده له أو عليه حسب الفرق (من لم يسلّم مبلغًا
+      مقدّمًا بعد يظهر رصيده عليه بالسالب بمقدار نصيبه). لكن لو كان هذا الشخص نفسه هو من
+      **دفع فعليًا** مصروفًا يشمل غيره (مثل دفع قيمة السكن لكل المجموعة)، يُضاف كامل ذلك
+      المبلغ في سطر جديد منفصل ("دفع [التصنيف]") فوق مبلغه المقدّم — لأنه مال حقيقي إضافي
+      دفعه من جيبه لتغطية المجموعة — وآخر سطر "مجموع الدفع" يجمع كل هذه المبالغ. أما لو
+      دفع مصروفًا لنفسه فقط فلا يُضاف شيء، لأن ذلك يُفترض أنه مموَّل من نفس مبلغه المقدّم.`
     },
     {
       title: '٤) تسجيل المصاريف',
       body: `من "إضافة مصروف" سجّل كل مصروف بوصفه وتصنيفه ومبلغه وعملته وتاريخه ومن دفعه،
       ثم حدّد **فقط** من شارك في هذا المصروف تحديدًا (وليس كل المجموعة). المصروف يُقسّم
       بالتساوي بين من حدّدتهم فقط. المشاركون المقفلون لا يظهرون كخيار في المصاريف الجديدة.
-      في خانة "الدافع" يوجد خيار "محصّل من الكل" يُستخدم لو المبلغ اتدفع موزّعًا من كل
-      المشاركين مباشرة (مثل فاتورة أكل انقسمت وقت الدفع) — هذا الخيار لا يُنشئ أي دين على
-      أحد لهذا المصروف تحديدًا، بعكس اختيار شخص واحد كدافع.`
+      في خانة "الدافع" يوجد خيار "من الميزانية" يُستخدم لو المبلغ يُصرف من رصيد المبالغ
+      المقدّمة (صندوق الرحلة) بدل أن يدفعه شخص معيّن من جيبه — يُقسَّم بالتساوي بين
+      المحدَّدين ويُخصم من نصيب كل واحد منهم كالمعتاد (فمن لم يقدّم مبلغًا كافيًا يظهر
+      عليه الفرق)، بعكس اختيار شخص واحد كدافع فعلي.`
     },
     {
       title: '٥) الإقفال الجزئي عند انسحاب مجموعة',
@@ -2610,7 +2629,7 @@
     expCurrency.innerHTML = currencies.map((c) => `<option value="${c}">${curLabel(c)}</option>`).join('');
 
     const active = (currentTripData.participants || []).filter((p) => p.status === 'active');
-    expPayer.innerHTML = `<option value="ALL">محصّل من الكل (دفع موزّع بالتساوي — بدون دين)</option>`
+    expPayer.innerHTML = `<option value="ALL">من الميزانية (موزّع بالتساوي — يُخصم من نصيب كل مشارك)</option>`
       + active.map((p) => `<option value="${p.id}">${escapeHTML(p.name)}</option>`).join('');
 
     const preserved = preservedParticipantIds || [];
